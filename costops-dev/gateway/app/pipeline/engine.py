@@ -17,6 +17,7 @@ from typing import Any
 from app.pipeline.router import SmartRouter
 from app.pipeline.compressor import PromptCompressor
 from app.pipeline.standardizer import TemplateStandardizer
+from app.services.token_counter import TokenCounter
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class PromptOptimizationEngine:
         self.router = SmartRouter()
         self.compressor = PromptCompressor()
         self.standardizer = TemplateStandardizer()
+        self.token_counter = TokenCounter(model="gpt-4o")
 
     # ── public API ───────────────────────────────────────
 
@@ -150,10 +152,8 @@ class PromptOptimizationEngine:
         # Final trim
         return text.strip()
 
-    @staticmethod
-    def _estimate_tokens(text: str) -> int:
+    def _estimate_tokens(self, text: str) -> int:
         """
-        Fast token estimate — approximately 1 token per 4 characters.
-        For production accuracy swap in tiktoken cl100k_base encoding.
+        Accurate token counting using the tiktoken TokenCounter service.
         """
-        return max(len(text) // 4, 1)
+        return self.token_counter.count(text)

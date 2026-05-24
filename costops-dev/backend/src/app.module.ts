@@ -4,9 +4,10 @@ import { UsersService } from './users/users.service';
 import { TeamsService } from './teams/teams.service';
 import { WalletService } from './wallet/wallet.service';
 import { AnalyticsService } from './analytics/analytics.service';
+import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [],
+  imports: [PrismaModule],
   controllers: [],
   providers: [
     AuthService,

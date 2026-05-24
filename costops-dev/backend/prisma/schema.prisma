@@ -1,0 +1,221 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ────────────────────────────────────────────────
+
+enum UserRole {
+  admin
+  member
+}
+
+enum SkillStatus {
+  weak
+  average
+  strong
+}
+
+enum AlertType {
+  leak
+  budget_warning
+}
+
+// ═════════════════════════════════════════════════════════
+//  Models
+// ═════════════════════════════════════════════════════════
+
+model User {
+  id           String      @id @default(uuid()) @db.Uuid
+  email        String      @unique @db.VarChar(255)
+  username     String      @unique @db.VarChar(128)
+  passwordHash String      @map("password_hash") @db.VarChar(255)
+  role         UserRole    @default(member)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  ownedTeams       Team[]          @relation("TeamOwner")
+  wallet           TokenWallet?
+  teamMemberships  TeamMember[]
+  promptLogs       PromptLog[]
+  apiKeys          ApiKey[]
+  routingRules     RoutingRule[]
+  skills           UserSkill[]
+  quizAttempts     QuizAttempt[]
+  costAlerts       CostAlert[]
+
+  @@map("users")
+}
+
+model Team {
+  id                String       @id @default(uuid()) @db.Uuid
+  name              String       @unique @db.VarChar(128)
+  ownerId           String       @map("owner_id") @db.Uuid
+  defaultDailyLimit Int          @default(500000) @map("default_daily_limit")
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  owner        User          @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members      TeamMember[]
+  routingRules RoutingRule[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  userId   String   @map("user_id") @db.Uuid
+  teamId   String   @map("team_id") @db.Uuid
+  joinedAt DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@id([userId, teamId])
+  @@map("team_members")
+}
+
+model TokenWallet {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  dailyLimitTokens   Int      @default(500000) @map("daily_limit_tokens")
+  usedTodayTokens    Int      @default(0) @map("used_today_tokens")
+  totalTokensAllTime Int      @default(0) @map("total_tokens_all_time")
+  hardLimitTokens    Int      @default(1000000) @map("hard_limit_tokens")
+  resetAt            DateTime @default(now()) @map("reset_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("token_wallets")
+}
+
+model ApiKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String   @db.VarChar(128)
+  keyHash   String   @unique @map("key_hash") @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+model RoutingRule {
+  id        String   @id @default(uuid()) @db.Uuid
+  teamId    String?  @map("team_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  provider  String   @db.VarChar(64)
+  model     String   @db.VarChar(64)
+  priority  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team? @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@map("routing_rules")
+}
+
+model PromptLog {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String?  @map("user_id") @db.Uuid
+  originalPrompt    String   @map("original_prompt") @db.Text
+  optimizedPrompt   String   @map("optimized_prompt") @db.Text
+  originalTokens    Int      @map("original_tokens")
+  optimizedTokens   Int      @map("optimized_tokens")
+  completionTokens  Int      @default(0) @map("completion_tokens")
+  modelRequested    String   @map("model_requested") @db.VarChar(64)
+  modelUsed         String   @map("model_used") @db.VarChar(64)
+  sourceTool        String   @default("api") @map("source_tool") @db.VarChar(64)
+  compressionRatio  Float    @default(0.0) @map("compression_ratio")
+  estimatedCostUsd  Float    @default(0.0) @map("estimated_cost_usd")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  user         User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  explanations AIExplanation[]
+
+  @@map("prompt_logs")
+}
+
+model AIExplanation {
+  id                 String   @id @default(uuid()) @db.Uuid
+  logId              String   @map("log_id") @db.Uuid
+  conceptName        String   @map("concept_name") @db.VarChar(255)
+  explanationSummary String   @map("explanation_summary") @db.Text
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  promptLog PromptLog      @relation(fields: [logId], references: [id], onDelete: Cascade)
+  quizzes   SocraticQuiz[]
+
+  @@map("ai_explanations")
+}
+
+model UserSkill {
+  id           String      @id @default(uuid()) @db.Uuid
+  userId       String      @map("user_id") @db.Uuid
+  skillName    String      @map("skill_name") @db.VarChar(128)
+  masteryScore Float       @default(0.0) @map("mastery_score")
+  status       SkillStatus @default(weak)
+
+  // ── Relationships ────────────────────────────────────
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_skills")
+}
+
+model SocraticQuiz {
+  id            String   @id @default(uuid()) @db.Uuid
+  explanationId String   @map("explanation_id") @db.Uuid
+  questionText  String   @map("question_text") @db.Text
+  options       Json
+  correctOption String   @map("correct_option") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  explanation AIExplanation @relation(fields: [explanationId], references: [id], onDelete: Cascade)
+  attempts    QuizAttempt[]
+
+  @@map("socratic_quizzes")
+}
+
+model QuizAttempt {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  quizId         String   @map("quiz_id") @db.Uuid
+  selectedOption String   @map("selected_option") @db.VarChar(255)
+  isCorrect      Boolean  @map("is_correct")
+  attemptedAt    DateTime @default(now()) @map("attempted_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quiz SocraticQuiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@map("quiz_attempts")
+}
+
+model CostAlert {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  alertType AlertType @map("alert_type")
+  message   String    @db.Text
+  isRead    Boolean   @default(false) @map("is_read")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // ── Relationships ────────────────────────────────────
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("cost_alerts")
+}

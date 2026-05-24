@@ -217,6 +217,7 @@ async def _persist_usage(
     1. Atomically increments ``used_today_tokens`` and ``total_tokens_all_time``
        on the user's ``TokenWallet``.
     2. Inserts a ``PromptLog`` audit row.
+    3. Broadcasts the updated wallet state via WebSocketService.
 
     Uses its own session so it is fully independent of the request lifecycle.
     """
@@ -225,27 +226,28 @@ async def _persist_usage(
 
     async with async_session_factory() as session:
         try:
-            # ── 1. Atomic wallet update ──────────────────
+            user_uuid = None
             if user_id:
                 try:
                     user_uuid = uuid.UUID(user_id)
                 except ValueError:
                     user_uuid = None
 
-                if user_uuid is not None:
-                    stmt = (
-                        update(TokenWallet)
-                        .where(TokenWallet.user_id == user_uuid)
-                        .values(
-                            used_today_tokens=TokenWallet.used_today_tokens + total_tokens_used,
-                            total_tokens_all_time=TokenWallet.total_tokens_all_time + total_tokens_used,
-                        )
+            # ── 1. Atomic wallet update ──────────────────
+            if user_uuid is not None:
+                stmt = (
+                    update(TokenWallet)
+                    .where(TokenWallet.user_id == user_uuid)
+                    .values(
+                        used_today_tokens=TokenWallet.used_today_tokens + total_tokens_used,
+                        total_tokens_all_time=TokenWallet.total_tokens_all_time + total_tokens_used,
                     )
-                    await session.execute(stmt)
+                )
+                await session.execute(stmt)
 
             # ── 2. Insert prompt log ─────────────────────
             log_entry = PromptLog(
-                user_id=uuid.UUID(user_id) if user_id else None,
+                user_id=user_uuid,
                 original_prompt=original_prompt,
                 optimized_prompt=optimized_prompt,
                 original_tokens=original_tokens,
@@ -258,6 +260,12 @@ async def _persist_usage(
                 estimated_cost_usd=estimated_cost,
             )
             session.add(log_entry)
+            await session.flush()
+
+            # ── 3. Run Leak Diagnostics ──────────────────
+            from app.services.leak_detector import check_leak_alerts
+            await check_leak_alerts(session, user_id, original_tokens)
+
             await session.commit()
 
             logger.info(
@@ -268,6 +276,25 @@ async def _persist_usage(
                 completion_tokens,
                 estimated_cost,
             )
+
+            # ── 3. WebSocket Real-time Broadcast ──────────
+            if user_uuid is not None:
+                from sqlalchemy import select
+                from app.routes.ws import ws_service
+                
+                # Fetch fresh balance from DB
+                stmt_select = select(TokenWallet).where(TokenWallet.user_id == user_uuid)
+                result = await session.execute(stmt_select)
+                wallet = result.scalar_one_or_none()
+                if wallet:
+                    ws_payload = {
+                        "userId": user_id,
+                        "balanceTokens": max(wallet.daily_limit_tokens - wallet.used_today_tokens, 0),
+                        "usedTokens": wallet.used_today_tokens,
+                        "monthlyBudget": wallet.daily_limit_tokens,
+                    }
+                    await ws_service.send_personal(user_id, ws_payload)
+
         except Exception:
             await session.rollback()
             logger.exception("Failed to persist usage data")
@@ -284,15 +311,15 @@ async def _stream_upstream(
     request_id: str,
     created_ts: int,
     model_used: str,
-) -> AsyncGenerator[tuple[str, int], None]:
+) -> AsyncGenerator[tuple[str, str], None]:
     """
     Open a streaming connection to the upstream provider and yield each
-    SSE line as-is.  Also accumulates the total completion text length so
-    the caller can estimate ``completion_tokens`` after the stream ends.
+    SSE line as-is.  Also accumulates the total completion text so
+    the caller can count ``completion_tokens`` after the stream ends.
 
-    Yields ``(sse_line, accumulated_char_count)`` tuples.
+    Yields ``(sse_line, accumulated_text)`` tuples.
     """
-    accumulated_chars = 0
+    accumulated_text = ""
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
         async with client.stream(
@@ -326,8 +353,8 @@ async def _stream_upstream(
                         }
                     ],
                 }
-                yield f"data: {json.dumps(error_chunk)}\n\n", 0
-                yield "data: [DONE]\n\n", 0
+                yield f"data: {json.dumps(error_chunk)}\n\n", ""
+                yield "data: [DONE]\n\n", ""
                 return
 
             # ── Stream SSE lines ─────────────────────────
@@ -340,7 +367,7 @@ async def _stream_upstream(
                 if line.startswith("data: "):
                     data_str = line[6:]
                     if data_str == "[DONE]":
-                        yield "data: [DONE]\n\n", accumulated_chars
+                        yield "data: [DONE]\n\n", accumulated_text
                         return
 
                     try:
@@ -351,14 +378,14 @@ async def _stream_upstream(
                             delta = choice.get("delta", {})
                             content_piece = delta.get("content", "")
                             if content_piece:
-                                accumulated_chars += len(content_piece)
+                                accumulated_text += content_piece
                     except json.JSONDecodeError:
                         pass
 
-                    yield f"data: {data_str}\n\n", accumulated_chars
+                    yield f"data: {data_str}\n\n", accumulated_text
 
     # Safety: always end with [DONE]
-    yield "data: [DONE]\n\n", accumulated_chars
+    yield "data: [DONE]\n\n", accumulated_text
 
 
 # ── Endpoint ─────────────────────────────────────────────
@@ -393,7 +420,7 @@ async def chat_completions(
     original_tokens = _counter.count(user_text)
 
     # Resolve user identity (injected by AuthMiddleware)
-    user_id: str | None = getattr(request.state, "user_id", None) or payload.user
+    user_id: str | None = getattr(request.state, "user_id", None) or payload.user or "00000000-0000-0000-0000-000000000000"
     source_tool: str = request.headers.get("X-Source-Tool", "api")
 
     # ── 2. Optimise ──────────────────────────────────────
@@ -436,8 +463,8 @@ async def chat_completions(
     if payload.stream:
         async def _sse_generator() -> AsyncGenerator[str, None]:
             """Relay upstream SSE chunks and persist usage when done."""
-            final_chars = 0
-            async for sse_line, char_count in _stream_upstream(
+            final_text = ""
+            async for sse_line, comp_text in _stream_upstream(
                 provider=provider,
                 upstream_url=upstream_url,
                 headers=headers,
@@ -446,12 +473,12 @@ async def chat_completions(
                 created_ts=created_ts,
                 model_used=model_used,
             ):
-                final_chars = char_count
+                final_text = comp_text
                 yield sse_line
 
             # ── Post-stream persistence ──────────────────
-            # Estimate completion tokens from accumulated characters.
-            est_completion_tokens = max(final_chars // 4, 1) if final_chars > 0 else 0
+            # Calculate actual completion tokens using TokenCounter.
+            est_completion_tokens = _counter.count(final_text) if final_text else 0
 
             await _persist_usage(
                 user_id=user_id,

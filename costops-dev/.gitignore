@@ -1,0 +1,25 @@
+# Chặn toàn bộ thư mục thư viện cài đặt (BẮT BUỘC)
+**/node_modules/
+node_modules/
+
+# Chặn các thư mục build sản phẩm của React / NestJS
+**/.next/
+**/dist/
+**/build/
+.next/
+dist/
+build/
+
+# Chặn các file cấu hình môi trường chứa mật khẩu, API key bí mật
+.env
+.env.local
+.env.production
+**/.env*.local
+
+# Chặn file rác hệ điều hành tự sinh
+.DS_Store
+Thumbs.db
+*.log
+
+# LƯU Ý: KHÔNG CHẶN .agents để giữ lại Skills cho AI Agent dùng chung
+!.agents/

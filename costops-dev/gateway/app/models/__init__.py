@@ -7,6 +7,15 @@ from app.models.models import (
     TeamMember,
     TokenWallet,
     PromptLog,
+    ApiKey,
+    RoutingRule,
+    AIExplanation,
+    UserSkill,
+    SkillStatus,
+    SocraticQuiz,
+    QuizAttempt,
+    CostAlert,
+    AlertType,
 )
 
 __all__ = [
@@ -16,4 +25,13 @@ __all__ = [
     "TeamMember",
     "TokenWallet",
     "PromptLog",
+    "ApiKey",
+    "RoutingRule",
+    "AIExplanation",
+    "UserSkill",
+    "SkillStatus",
+    "SocraticQuiz",
+    "QuizAttempt",
+    "CostAlert",
+    "AlertType",
 ]

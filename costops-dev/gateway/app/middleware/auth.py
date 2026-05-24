@@ -33,7 +33,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Skip auth for public endpoints
-        if request.url.path in _PUBLIC_PATHS or request.method == "OPTIONS":
+        if request.url.path in _PUBLIC_PATHS or request.url.path.startswith("/ws/") or request.method == "OPTIONS":
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")

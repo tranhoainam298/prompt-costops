@@ -5,6 +5,7 @@ interface TokenBarProps {
   total: number;
   saved: number;
   label?: string;
+  status?: 'green' | 'yellow' | 'red';
 }
 
 const TokenBar: React.FC<TokenBarProps> = ({
@@ -12,12 +13,13 @@ const TokenBar: React.FC<TokenBarProps> = ({
   total,
   saved,
   label = 'Token Usage',
+  status = 'green',
 }) => {
   const usedPercent = total > 0 ? Math.min((used / total) * 100, 100) : 0;
   const savedPercent = total > 0 ? Math.min((saved / total) * 100, 100) : 0;
 
   return (
-    <div className="token-bar">
+    <div className={`token-bar token-bar-${status}`}>
       <div className="token-bar-header">
         <span className="token-bar-label">{label}</span>
         <span className="token-bar-stats">
@@ -29,7 +31,7 @@ const TokenBar: React.FC<TokenBarProps> = ({
       </div>
       <div className="token-bar-track">
         <div
-          className="token-bar-fill token-bar-fill-used"
+          className={`token-bar-fill token-bar-fill-used token-bar-fill-${status}`}
           style={{ width: `${usedPercent}%` }}
         />
         <div

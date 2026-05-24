@@ -1,16 +1,8 @@
 """
 costops-dev — Consolidated SQLAlchemy ORM Models.
 
-Tables
-------
-  • ``users``          – application user accounts
-  • ``teams``          – organisational teams with shared budgets
-  • ``team_members``   – many-to-many join table (composite PK)
-  • ``token_wallets``  – per-user daily/total token budgets
-  • ``prompt_logs``    – audit trail for every optimised prompt
-
-All primary keys use server-side UUID generation via ``uuid4``.
-Timestamps are timezone-aware and default to ``utcnow``.
+Contains the full 12-table capstone database schema for unified cost tracking.
+All primary keys and foreign keys use UUIDs uniformly.
 """
 
 from __future__ import annotations
@@ -18,6 +10,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import (
     Column,
@@ -29,8 +22,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Boolean,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -54,6 +48,19 @@ class UserRole(str, enum.Enum):
     """Allowed roles for a user account."""
     admin = "admin"
     member = "member"
+
+
+class SkillStatus(str, enum.Enum):
+    """Status of user skill mastery."""
+    weak = "weak"
+    average = "average"
+    strong = "strong"
+
+
+class AlertType(str, enum.Enum):
+    """Types of cost alerts."""
+    leak = "leak"
+    budget_warning = "budget_warning"
 
 
 # ═════════════════════════════════════════════════════════
@@ -87,17 +94,32 @@ class User(Base):
     )
 
     # ── Relationships ────────────────────────────────────
-    owned_teams: Mapped[list["Team"]] = relationship(
+    owned_teams: Mapped[list[Team]] = relationship(
         "Team", back_populates="owner", lazy="selectin",
     )
-    wallet: Mapped["TokenWallet | None"] = relationship(
+    wallet: Mapped[TokenWallet | None] = relationship(
         "TokenWallet", back_populates="user", uselist=False, lazy="selectin",
     )
-    team_memberships: Mapped[list["TeamMember"]] = relationship(
+    team_memberships: Mapped[list[TeamMember]] = relationship(
         "TeamMember", back_populates="user", lazy="selectin",
     )
-    prompt_logs: Mapped[list["PromptLog"]] = relationship(
+    prompt_logs: Mapped[list[PromptLog]] = relationship(
         "PromptLog", back_populates="user", lazy="noload",
+    )
+    api_keys: Mapped[list[ApiKey]] = relationship(
+        "ApiKey", back_populates="user", lazy="selectin",
+    )
+    routing_rules: Mapped[list[RoutingRule]] = relationship(
+        "RoutingRule", back_populates="user", lazy="selectin",
+    )
+    skills: Mapped[list[UserSkill]] = relationship(
+        "UserSkill", back_populates="user", lazy="selectin",
+    )
+    quiz_attempts: Mapped[list[QuizAttempt]] = relationship(
+        "QuizAttempt", back_populates="user", lazy="noload",
+    )
+    cost_alerts: Mapped[list[CostAlert]] = relationship(
+        "CostAlert", back_populates="user", lazy="selectin",
     )
 
     def __repr__(self) -> str:
@@ -133,11 +155,14 @@ class Team(Base):
     )
 
     # ── Relationships ────────────────────────────────────
-    owner: Mapped["User"] = relationship(
+    owner: Mapped[User] = relationship(
         "User", back_populates="owned_teams", lazy="selectin",
     )
-    members: Mapped[list["TeamMember"]] = relationship(
+    members: Mapped[list[TeamMember]] = relationship(
         "TeamMember", back_populates="team", lazy="selectin",
+    )
+    routing_rules: Mapped[list[RoutingRule]] = relationship(
+        "RoutingRule", back_populates="team", lazy="selectin",
     )
 
     def __repr__(self) -> str:
@@ -145,7 +170,7 @@ class Team(Base):
 
 
 # ═════════════════════════════════════════════════════════
-#  TeamMember  (composite PK)
+#  TeamMember
 # ═════════════════════════════════════════════════════════
 
 class TeamMember(Base):
@@ -168,10 +193,10 @@ class TeamMember(Base):
     )
 
     # ── Relationships ────────────────────────────────────
-    user: Mapped["User"] = relationship(
+    user: Mapped[User] = relationship(
         "User", back_populates="team_memberships", lazy="selectin",
     )
-    team: Mapped["Team"] = relationship(
+    team: Mapped[Team] = relationship(
         "Team", back_populates="members", lazy="selectin",
     )
 
@@ -217,7 +242,7 @@ class TokenWallet(Base):
     )
 
     # ── Relationships ────────────────────────────────────
-    user: Mapped["User"] = relationship(
+    user: Mapped[User] = relationship(
         "User", back_populates="wallet", lazy="selectin",
     )
 
@@ -226,6 +251,95 @@ class TokenWallet(Base):
             f"<TokenWallet id={self.id} user={self.user_id} "
             f"used_today={self.used_today_tokens}/{self.daily_limit_tokens}>"
         )
+
+
+# ═════════════════════════════════════════════════════════
+#  ApiKey
+# ═════════════════════════════════════════════════════════
+
+class ApiKey(Base):
+    """Per-user API key management."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_new_uuid,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(
+        String(128), nullable=False,
+    )
+    key_hash: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False,
+    )
+
+    # ── Relationships ────────────────────────────────────
+    user: Mapped[User] = relationship(
+        "User", back_populates="api_keys", lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ApiKey id={self.id} user={self.user_id} name={self.name!r}>"
+
+
+# ═════════════════════════════════════════════════════════
+#  RoutingRule
+# ═════════════════════════════════════════════════════════
+
+class RoutingRule(Base):
+    """Custom provider routing rules per user or team."""
+
+    __tablename__ = "routing_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_new_uuid,
+    )
+    team_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(
+        String(64), nullable=False,
+    )
+    model: Mapped[str] = mapped_column(
+        String(64), nullable=False,
+    )
+    priority: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False,
+    )
+
+    # ── Relationships ────────────────────────────────────
+    user: Mapped[User | None] = relationship(
+        "User", back_populates="routing_rules", lazy="selectin",
+    )
+    team: Mapped[Team | None] = relationship(
+        "Team", back_populates="routing_rules", lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<RoutingRule id={self.id} provider={self.provider} model={self.model}>"
 
 
 # ═════════════════════════════════════════════════════════
@@ -240,7 +354,7 @@ class PromptLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=_new_uuid,
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
@@ -267,8 +381,11 @@ class PromptLog(Base):
     )
 
     # ── Relationships ────────────────────────────────────
-    user: Mapped["User | None"] = relationship(
+    user: Mapped[User | None] = relationship(
         "User", back_populates="prompt_logs", lazy="selectin",
+    )
+    explanations: Mapped[list[AIExplanation]] = relationship(
+        "AIExplanation", back_populates="prompt_log", lazy="selectin",
     )
 
     def __repr__(self) -> str:
@@ -276,3 +393,212 @@ class PromptLog(Base):
             f"<PromptLog id={self.id} model_used={self.model_used!r} "
             f"saved={self.original_tokens - self.optimized_tokens}>"
         )
+
+
+# ═════════════════════════════════════════════════════════
+#  AIExplanation
+# ═════════════════════════════════════════════════════════
+
+class AIExplanation(Base):
+    """Concept explanations linked to prompt logs."""
+
+    __tablename__ = "ai_explanations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_new_uuid,
+    )
+    log_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("prompt_logs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    concept_name: Mapped[str] = mapped_column(
+        String(255), nullable=False,
+    )
+    explanation_summary: Mapped[str] = mapped_column(
+        Text, nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False,
+    )
+
+    # ── Relationships ────────────────────────────────────
+    prompt_log: Mapped[PromptLog] = relationship(
+        "PromptLog", back_populates="explanations", lazy="selectin",
+    )
+    quizzes: Mapped[list[SocraticQuiz]] = relationship(
+        "SocraticQuiz", back_populates="explanation", lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<AIExplanation id={self.id} concept={self.concept_name!r}>"
+
+
+# ═════════════════════════════════════════════════════════
+#  UserSkill
+# ═════════════════════════════════════════════════════════
+
+class UserSkill(Base):
+    """Per-user skill mastery tracking."""
+
+    __tablename__ = "user_skills"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_new_uuid,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    skill_name: Mapped[str] = mapped_column(
+        String(128), nullable=False,
+    )
+    mastery_score: Mapped[float] = mapped_column(
+        Float, default=0.0, nullable=False,
+    )
+    status: Mapped[SkillStatus] = mapped_column(
+        Enum(SkillStatus, name="skill_status", create_constraint=True),
+        default=SkillStatus.weak,
+        nullable=False,
+    )
+
+    # ── Relationships ────────────────────────────────────
+    user: Mapped[User] = relationship(
+        "User", back_populates="skills", lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserSkill skill={self.skill_name!r} score={self.mastery_score}>"
+
+
+# ═════════════════════════════════════════════════════════
+#  SocraticQuiz
+# ═════════════════════════════════════════════════════════
+
+class SocraticQuiz(Base):
+    """Quiz questions generated from AI explanations."""
+
+    __tablename__ = "socratic_quizzes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_new_uuid,
+    )
+    explanation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_explanations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    question_text: Mapped[str] = mapped_column(
+        Text, nullable=False,
+    )
+    options: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False,
+    )
+    correct_option: Mapped[str] = mapped_column(
+        String(255), nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False,
+    )
+
+    # ── Relationships ────────────────────────────────────
+    explanation: Mapped[AIExplanation] = relationship(
+        "AIExplanation", back_populates="quizzes", lazy="selectin",
+    )
+    attempts: Mapped[list[QuizAttempt]] = relationship(
+        "QuizAttempt", back_populates="quiz", lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<SocraticQuiz id={self.id}>"
+
+
+# ═════════════════════════════════════════════════════════
+#  QuizAttempt
+# ═════════════════════════════════════════════════════════
+
+class QuizAttempt(Base):
+    """User quiz attempt records."""
+
+    __tablename__ = "quiz_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_new_uuid,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    quiz_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("socratic_quizzes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    selected_option: Mapped[str] = mapped_column(
+        String(255), nullable=False,
+    )
+    is_correct: Mapped[bool] = mapped_column(
+        Boolean, nullable=False,
+    )
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False,
+    )
+
+    # ── Relationships ────────────────────────────────────
+    user: Mapped[User] = relationship(
+        "User", back_populates="quiz_attempts", lazy="selectin",
+    )
+    quiz: Mapped[SocraticQuiz] = relationship(
+        "SocraticQuiz", back_populates="attempts", lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<QuizAttempt id={self.id} correct={self.is_correct}>"
+
+
+# ═════════════════════════════════════════════════════════
+#  CostAlert
+# ═════════════════════════════════════════════════════════
+
+class CostAlert(Base):
+    """Budget warnings and leak detection alerts."""
+
+    __tablename__ = "cost_alerts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_new_uuid,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    alert_type: Mapped[AlertType] = mapped_column(
+        Enum(AlertType, name="alert_type", create_constraint=True),
+        nullable=False,
+    )
+    message: Mapped[str] = mapped_column(
+        Text, nullable=False,
+    )
+    is_read: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False,
+    )
+
+    # ── Relationships ────────────────────────────────────
+    user: Mapped[User] = relationship(
+        "User", back_populates="cost_alerts", lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<CostAlert id={self.id} type={self.alert_type}>"

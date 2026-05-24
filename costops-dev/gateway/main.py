@@ -13,6 +13,8 @@ from database import init_db, shutdown_db
 from app.routes.chat import router as chat_router
 from app.routes.usage import router as usage_router
 from app.routes.wallet import router as wallet_router
+from app.routes.ws import router as ws_router
+from app.routes.alerts import router as alerts_router
 from app.middleware.auth import AuthMiddleware
 from app.middleware.quota_guard import QuotaGuardMiddleware
 
@@ -61,6 +63,8 @@ app.add_middleware(AuthMiddleware)
 app.include_router(chat_router)
 app.include_router(usage_router)
 app.include_router(wallet_router)
+app.include_router(ws_router)
+app.include_router(alerts_router)
 
 
 @app.get("/health", tags=["system"])
