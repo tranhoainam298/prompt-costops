@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Send, Loader2, Sparkles, Bot, User, Key, Plus, MessageSquare, X, Clipboard, Check } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -56,6 +57,7 @@ const Playground: React.FC = () => {
   const [rawPrompt, setRawPrompt] = useState<string>('');
   const [optimizedPrompt, setOptimizedPrompt] = useState<string>('');
   const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
   // Telemetry State
@@ -212,8 +214,9 @@ const Playground: React.FC = () => {
   };
 
   const handleOptimize = async () => {
-    if (!rawPrompt.trim() || isOptimizing) return;
+    if (!rawPrompt.trim() || isOptimizing || isGenerating) return;
     setIsOptimizing(true);
+    setOptimizedPrompt('');
     try {
       const res = await fetch('/v1/prompt/optimize', {
         method: 'POST',
@@ -222,18 +225,52 @@ const Playground: React.FC = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        // Bind the structured response string gracefully to the right panel state
+        console.log("DEBUG API Response:", data);
+        setOptimizedPrompt(data.optimized_prompt || "ERROR: BACKEND RETURNED EMPTY DATA");
+        setOriginalTokens(data.original_tokens ?? null);
+        setOptimizedTokens(data.optimized_tokens ?? null);
+        setSavingsPercentage(data.savings_percentage ?? null);
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        console.error("GATEWAY ERROR DETAILS:", res.status, errorData);
+        setOptimizedPrompt(`⚠️ Error ${res.status}: Optimization failed. Details: ${JSON.stringify(errorData)}`);
+      }
+    } catch (error: any) {
+      console.error("GATEWAY ERROR 422 DETAILS:", error.response?.data || error.message);
+      setOptimizedPrompt(`⚠️ Network Error: ${error}`);
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!rawPrompt.trim() || isOptimizing || isGenerating) return;
+    setIsGenerating(true);
+    setOptimizedPrompt('');
+    try {
+      const res = await fetch('/v1/prompt/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw_prompt: rawPrompt }),
+      });
+      if (res.ok) {
+        const data = await res.json();
         setOptimizedPrompt(data.optimized_prompt || data.content || JSON.stringify(data, null, 2));
         setOriginalTokens(data.original_tokens ?? null);
         setOptimizedTokens(data.optimized_tokens ?? null);
         setSavingsPercentage(data.savings_percentage ?? null);
       } else {
-        setOptimizedPrompt(`⚠️ Error ${res.status}: Optimization failed.`);
+        let errStr = `⚠️ Error ${res.status}: Generation failed.`;
+        try {
+          const errData = await res.json();
+          if (errData.detail) errStr = `⚠️ Error: ${errData.detail}`;
+        } catch {}
+        setOptimizedPrompt(errStr);
       }
     } catch (error) {
       setOptimizedPrompt(`⚠️ Network Error: ${error}`);
     } finally {
-      setIsOptimizing(false);
+      setIsGenerating(false);
     }
   };
 
@@ -256,17 +293,79 @@ const Playground: React.FC = () => {
     return false;
   };
 
+  const renderStaggeredMarkdown = (text: string) => {
+    const lines = text.split('\n');
+    return (
+      <div className="w-full flex-1 bg-slate-950/40 backdrop-blur-md border border-white/5 rounded-2xl p-6 font-mono text-sm text-slate-300 overflow-y-auto whitespace-pre-wrap text-pretty break-words shadow-inner">
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={{
+            hidden: {},
+            visible: { transition: { staggerChildren: 0.04 } }
+          }}
+        >
+          {lines.map((line, i) => (
+            <motion.div
+              key={i}
+              variants={{
+                hidden: { opacity: 0, y: 8 },
+                visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 150, damping: 25 } }
+              }}
+              className="min-h-[1.5em]" // ensure empty lines take up vertical space
+            >
+              {line}
+            </motion.div>
+          ))}
+        </motion.div>
+      </div>
+    );
+  };
+
   return (
-    <div className="flex w-full h-dvh bg-slate-950 text-slate-100 overflow-hidden font-sans">
+    <div className="flex w-full h-dvh bg-[#030712] text-slate-100 overflow-hidden font-sans relative">
+      <style>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-150%) skewX(-20deg); }
+          100% { transform: translateX(150%) skewX(-20deg); }
+        }
+        .animate-shimmer {
+          animation: shimmer 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+        }
+      `}</style>
       
+      {/* AMBIENT BACKGROUND */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
+        <motion.div 
+          animate={{ 
+            opacity: [0.15, 0.35, 0.15],
+            scale: [1, 1.05, 1],
+            rotate: [0, 90, 0]
+          }}
+          transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+          className="absolute -top-[20%] -left-[10%] w-[50vw] h-[50vw] rounded-full bg-indigo-500/10 blur-[120px]" 
+        />
+        <motion.div 
+          animate={{ 
+            opacity: [0.1, 0.25, 0.1],
+            scale: [1, 1.1, 1],
+            rotate: [0, -90, 0]
+          }}
+          transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+          className="absolute top-[40%] -right-[10%] w-[40vw] h-[40vw] rounded-full bg-emerald-500/10 blur-[120px]" 
+        />
+      </div>
+
       {/* Left Workspace Sidebar */}
-      <aside className="w-64 bg-slate-950 border-r border-slate-800 p-3 flex flex-col h-full shrink-0 z-10">
-        <button 
+      <aside className="w-64 bg-slate-950/80 backdrop-blur-xl border-r border-white/5 p-3 flex flex-col h-full shrink-0 z-20 shadow-2xl">
+        <motion.button 
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
           onClick={handleNewChat}
-          className="w-full py-2.5 bg-slate-900 border border-slate-800 rounded-xl hover:bg-slate-800 text-xs font-semibold tracking-wide transition-colors duration-200 flex items-center gap-2 mb-4 px-4 shadow-sm"
+          className="w-full py-2.5 bg-slate-900 border border-white/5 rounded-xl hover:bg-slate-800 hover:border-white/10 text-xs font-semibold tracking-wide transition-colors duration-200 flex items-center gap-2 mb-4 px-4 shadow-sm"
         >
           <Plus size={16} /> New Chat
-        </button>
+        </motion.button>
 
         <div className="flex-1 overflow-y-auto flex flex-col gap-1 pr-1 pb-4">
           <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-2 px-2 pt-2">Recent</span>
@@ -274,8 +373,8 @@ const Playground: React.FC = () => {
             <button
               key={s.id}
               onClick={() => loadSession(s.id)}
-              className={`text-left text-xs p-2 rounded-lg truncate text-pretty transition-colors duration-200 flex items-center gap-2 ${
-                activeSessionId === s.id ? 'bg-slate-800 text-slate-200 font-medium' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-300'
+              className={`text-left text-xs p-2 rounded-lg truncate text-pretty transition-all duration-200 flex items-center gap-2 ${
+                activeSessionId === s.id ? 'bg-slate-800 text-slate-200 font-medium border border-white/5' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-300 border border-transparent'
               }`}
             >
               <MessageSquare size={14} className="shrink-0" />
@@ -284,27 +383,30 @@ const Playground: React.FC = () => {
           ))}
         </div>
 
-        <div className="mt-auto pt-3 border-t border-slate-800 flex items-center justify-between">
-          <button
+        <div className="mt-auto pt-3 border-t border-white/5 flex items-center justify-between">
+          <motion.button
+            whileHover={{ scale: 1.1, rotate: 90 }}
+            whileTap={{ scale: 0.9 }}
+            transition={{ type: "spring", stiffness: 200, damping: 15 }}
             onClick={() => setIsSettingsOpen(true)}
             aria-label="Open Platform Settings"
             className="w-10 h-10 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 flex items-center justify-center transition-colors duration-200"
           >
             <Settings size={20} />
-          </button>
+          </motion.button>
         </div>
       </aside>
 
       {/* Main Console Sandbox */}
-      <main className="flex-1 flex flex-col h-full relative" aria-label="Interactive Sandbox Console">
+      <main className="flex-1 flex flex-col h-full relative z-10" aria-label="Interactive Sandbox Console">
         {/* Header */}
-        <header className="px-5 py-3 border-b border-slate-800/60 bg-slate-950/80 backdrop-blur flex justify-between items-center z-10 shrink-0">
+        <header className="px-6 py-4 border-b border-white/5 bg-slate-950/60 backdrop-blur-2xl flex justify-between items-center z-20 shrink-0 shadow-lg">
           <div className="flex items-center gap-3">
             <Sparkles size={16} className="text-blue-400" />
             <h1 className="text-sm font-bold font-mono text-slate-300 uppercase tracking-widest">Interactive Console</h1>
             
             <select
-              className="ml-4 bg-slate-900 border border-slate-800 text-slate-300 text-xs px-3 py-1.5 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono cursor-pointer transition-colors duration-200"
+              className="ml-4 bg-slate-900 border border-white/5 text-slate-300 text-xs px-3 py-1.5 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono cursor-pointer transition-colors duration-200 shadow-inner"
               value={model}
               onChange={(e) => setModel(e.target.value)}
             >
@@ -317,289 +419,391 @@ const Playground: React.FC = () => {
           </div>
         </header>
 
-        {/* Tab Switcher Container */}
-        <div className="px-5 pt-4 bg-slate-950 shrink-0">
-          <div className="bg-slate-900/60 p-1 rounded-xl flex border border-slate-800/60 w-fit">
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
-                activeTab === 'chat'
-                  ? 'bg-slate-800 text-slate-100 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
-              }`}
-            >
-              💬 Live Agent Chat
-            </button>
-            <button
-              onClick={() => setActiveTab('optimizer')}
-              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
-                activeTab === 'optimizer'
-                  ? 'bg-slate-800 text-slate-100 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
-              }`}
-            >
-              ⚡ Prompt Optimizer Studio
-            </button>
+        {/* Animated Tab Switcher Container */}
+        <div className="px-6 pt-6 bg-transparent shrink-0">
+          <div className="bg-slate-900/40 backdrop-blur-xl p-1.5 rounded-2xl flex border border-white/5 w-fit shadow-xl shadow-black/40">
+            {['chat', 'optimizer'].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab as 'chat' | 'optimizer')}
+                className="relative px-5 py-2 text-xs font-bold rounded-xl transition-colors duration-200"
+              >
+                {activeTab === tab && (
+                  <motion.div
+                    layoutId="activeTabPill"
+                    className="absolute inset-0 bg-slate-800 border border-white/10 rounded-xl shadow-md"
+                    transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                  />
+                )}
+                <span className={`relative z-10 ${activeTab === tab ? 'text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
+                  {tab === 'chat' ? '💬 Live Agent Chat' : '⚡ Prompt Optimizer Studio'}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
 
-        {activeTab === 'chat' ? (
-          /* =========================================
-             TAB 1: LIVE AGENT CHAT
-             ========================================= */
-          <>
-            {/* Messaging Stream */}
-            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-6">
-              {messages.length === 0 ? (
-                <div className="m-auto text-center max-w-sm flex flex-col items-center gap-4 mt-32">
-                  <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center shadow-lg">
-                    <Bot size={32} className="text-slate-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-slate-200 font-mono uppercase tracking-wider">Console Sandbox</p>
-                    <p className="text-xs text-slate-500 mt-2 text-pretty leading-relaxed">
-                      Submit a prompt to test dynamic contextual compression. Output statistics will reflect real-time budget optimization.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                messages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex gap-4 max-w-3xl ${
-                      msg.role === 'user' ? 'self-end flex-row-reverse' : 'self-start'
-                    }`}
+        <AnimatePresence mode="wait">
+          {activeTab === 'chat' ? (
+            /* =========================================
+               TAB 1: LIVE AGENT CHAT
+               ========================================= */
+            <motion.div 
+              key="chat-tab"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ type: "spring", stiffness: 100, damping: 20 }}
+              className="flex-1 overflow-hidden flex flex-col relative z-10"
+            >
+              {/* Messaging Stream */}
+              <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+                {messages.length === 0 ? (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ type: "spring", stiffness: 100, damping: 20, delay: 0.1 }}
+                    className="m-auto text-center max-w-sm flex flex-col items-center gap-4 mt-32"
                   >
-                    <div className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${
-                      msg.role === 'user' ? 'bg-blue-900/50 text-blue-300' : 'bg-slate-800 text-slate-300'
-                    }`}>
-                      {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+                    <div className="w-16 h-16 rounded-3xl bg-slate-900/60 backdrop-blur-xl border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+                      <Bot size={32} className="text-slate-400" />
                     </div>
-                    <div
-                      className={`px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
-                        msg.role === 'user'
-                          ? 'bg-blue-950/40 border border-blue-900/30 text-blue-100 rounded-tr-sm'
-                          : 'bg-slate-900 border border-slate-800 text-slate-300 rounded-tl-sm'
+                    <div>
+                      <p className="text-sm font-bold text-slate-200 font-mono uppercase tracking-wider">Console Sandbox</p>
+                      <p className="text-xs text-slate-500 mt-2 text-pretty leading-relaxed">
+                        Submit a prompt to test dynamic contextual compression. Output statistics will reflect real-time budget optimization.
+                      </p>
+                    </div>
+                  </motion.div>
+                ) : (
+                  messages.map((msg, idx) => (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ type: "spring", stiffness: 150, damping: 20 }}
+                      key={idx}
+                      className={`flex gap-4 max-w-3xl ${
+                        msg.role === 'user' ? 'self-end flex-row-reverse' : 'self-start'
                       }`}
                     >
-                      <p className="whitespace-pre-wrap text-pretty">{msg.content}</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Token Usage Badge Strip */}
-            {usage && (
-              <div className="px-5 py-2 border-t border-slate-800/50 bg-slate-900/50 flex flex-wrap gap-2" aria-label="Completion metadata stats">
-                <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-400 tabular-nums">
-                  Prompt: {usage.prompt_tokens}
-                </span>
-                <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-400 tabular-nums">
-                  Completion: {usage.completion_tokens}
-                </span>
-                <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/30 border border-emerald-900/30 text-emerald-400 tabular-nums">
-                  Saved: {usage.tokens_saved}
-                </span>
-                <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-amber-950/30 border border-amber-900/30 text-amber-400 tabular-nums">
-                  Saved Ratio: {(usage.compression_ratio * 100).toFixed(1)}%
-                </span>
-              </div>
-            )}
-
-            {/* Code Input Form */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 shrink-0">
-              <form 
-                className="max-w-4xl mx-auto bg-slate-900 border border-slate-700 rounded-xl flex gap-2 items-end p-2 shadow-sm focus-within:ring-1 focus-within:ring-slate-600 transition-shadow duration-200"
-                onSubmit={handleSubmit}
-              >
-                <textarea
-                  className="flex-1 font-sans bg-transparent border-none p-2 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-0 resize-none min-h-[44px] max-h-[200px]"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Message CostOps..."
-                  disabled={loading}
-                  rows={1}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSubmit(e);
-                    }
-                  }}
-                />
-                <button
-                  type="submit"
-                  className="w-9 h-9 mb-0.5 mr-0.5 rounded-lg bg-slate-100 hover:bg-white text-slate-900 flex items-center justify-center transition-colors duration-200 shrink-0 disabled:opacity-50 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed"
-                  disabled={loading || !input.trim()}
-                  title="Send completion"
-                  aria-label="Send completion"
-                >
-                  {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                </button>
-              </form>
-              <div className="text-center mt-2">
-                <span className="text-[10px] text-slate-500 font-sans text-pretty">
-                  CostOps can make mistakes. Consider verifying critical token optimizations.
-                </span>
-              </div>
-            </div>
-          </>
-        ) : (
-          /* =========================================
-             TAB 2: PROMPT OPTIMIZER STUDIO
-             ========================================= */
-          <div className="flex-1 p-5 overflow-hidden flex flex-col">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0">
-              
-              {/* LEFT STUDIO PANEL */}
-              <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 p-5 rounded-2xl flex flex-col justify-between transition-all duration-200 hover:border-slate-700/60 overflow-hidden">
-                <div className="flex flex-col flex-1 min-h-0">
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 shrink-0">Input Raw Prompt</h2>
-                  <textarea
-                    className="w-full flex-1 bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 resize-none font-sans text-sm text-pretty"
-                    placeholder="Draft your raw instructions here..."
-                    value={rawPrompt}
-                    onChange={(e) => setRawPrompt(e.target.value)}
-                  />
-                </div>
-                <div className="flex items-center justify-between mt-4 shrink-0">
-                  <div className="flex flex-col gap-1">
-                    <span className="tabular-nums text-xs text-slate-400 font-medium font-mono">
-                      Original Tokens: {originalTokens ?? '--'}
-                    </span>
-                    <span className="tabular-nums text-xs text-slate-400 font-medium font-mono">
-                      Optimized Tokens: {optimizedTokens ?? '--'}
-                    </span>
-                    <span className="tabular-nums text-xs text-slate-400 font-medium font-mono">
-                      Saved: {savingsPercentage !== null ? savingsPercentage.toFixed(1) : '--'}%
-                    </span>
-                  </div>
-                  <button
-                    onClick={handleOptimize}
-                    disabled={isOptimizing || !rawPrompt.trim()}
-                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:bg-blue-800 text-white font-medium text-sm px-5 py-2.5 rounded-xl shadow-lg shadow-blue-900/20 transition-all active:scale-[0.98] flex items-center gap-2"
-                  >
-                    {isOptimizing ? <Loader2 size={16} className="animate-spin" /> : '⚡ Optimize & Structure Prompt'}
-                  </button>
-                </div>
-              </div>
-
-              {/* RIGHT EXPORTER PANEL */}
-              <div className="bg-slate-950 border border-slate-800 p-5 rounded-2xl flex flex-col relative transition-all duration-200 overflow-hidden">
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 shrink-0">Optimized Canonical Output</h2>
-                
-                <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
-                  {optimizedPrompt && (
-                    <>
-                      <button 
-                        onClick={handleCopy}
-                        aria-label="Copy optimized prompt to clipboard"
-                        className="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition-all duration-200"
+                      <div className={`w-10 h-10 shrink-0 rounded-2xl flex items-center justify-center shadow-lg border border-white/5 ${
+                        msg.role === 'user' ? 'bg-blue-600/20 backdrop-blur-md text-blue-300' : 'bg-slate-800/60 backdrop-blur-md text-slate-300'
+                      }`}>
+                        {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
+                      </div>
+                      <div
+                        className={`px-5 py-4 rounded-3xl text-sm leading-relaxed shadow-xl backdrop-blur-xl border border-white/5 ${
+                          msg.role === 'user'
+                            ? 'bg-blue-900/30 text-blue-100 rounded-tr-sm'
+                            : 'bg-slate-900/40 text-slate-200 rounded-tl-sm'
+                        }`}
                       >
-                        {isCopied ? <Check size={14} className="text-emerald-400" /> : <Clipboard size={14} />}
-                      </button>
-                      <button className="bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-medium text-xs px-3 py-1.5 rounded-lg transition-all">
-                        🚀 Execute Live on Gemini
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {!optimizedPrompt ? (
-                  <div className="w-full flex-1 bg-slate-900/20 border border-slate-800/50 rounded-xl p-4 flex flex-col items-center justify-center text-slate-500 text-sm">
-                    <Sparkles size={24} className="mb-3 opacity-20" />
-                    <p>Awaiting prompt optimization...</p>
-                  </div>
-                ) : (
-                  <div className="w-full flex-1 bg-slate-900/20 border border-slate-800/50 rounded-xl p-4 font-mono text-sm text-slate-300 overflow-y-auto whitespace-pre-wrap text-pretty break-words">
-                    {optimizedPrompt}
-                  </div>
+                        <p className="whitespace-pre-wrap text-pretty">{msg.content}</p>
+                      </div>
+                    </motion.div>
+                  ))
                 )}
               </div>
 
-            </div>
-          </div>
-        )}
+              {/* Token Usage Badge Strip */}
+              <AnimatePresence>
+                {usage && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="px-6 py-3 border-t border-white/5 bg-slate-900/30 backdrop-blur-xl flex flex-wrap gap-3 overflow-hidden" 
+                    aria-label="Completion metadata stats"
+                  >
+                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-slate-950/80 border border-white/5 text-slate-400 tabular-nums shadow-inner">
+                      Prompt: {usage.prompt_tokens}
+                    </span>
+                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-slate-950/80 border border-white/5 text-slate-400 tabular-nums shadow-inner">
+                      Completion: {usage.completion_tokens}
+                    </span>
+                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-emerald-950/30 border border-emerald-900/30 text-emerald-400 tabular-nums shadow-inner">
+                      Saved: {usage.tokens_saved}
+                    </span>
+                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-amber-950/30 border border-amber-900/30 text-amber-400 tabular-nums shadow-inner">
+                      Saved Ratio: {(usage.compression_ratio * 100).toFixed(1)}%
+                    </span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Code Input Form */}
+              <div className="p-6 bg-slate-950/60 backdrop-blur-2xl border-t border-white/5 shrink-0 z-20">
+                <form 
+                  className="max-w-4xl mx-auto bg-slate-900/60 backdrop-blur-xl border border-white/10 rounded-2xl flex gap-2 items-end p-2 shadow-2xl focus-within:ring-2 focus-within:ring-slate-700/50 transition-all duration-300"
+                  onSubmit={handleSubmit}
+                >
+                  <textarea
+                    className="flex-1 font-sans bg-transparent border-none p-3 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-0 resize-none min-h-[50px] max-h-[250px]"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Message CostOps..."
+                    disabled={loading}
+                    rows={1}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSubmit(e);
+                      }
+                    }}
+                  />
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    type="submit"
+                    className="w-11 h-11 mb-1 mr-1 rounded-xl bg-slate-100 hover:bg-white text-slate-900 flex items-center justify-center transition-colors duration-200 shrink-0 disabled:opacity-50 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed shadow-lg"
+                    disabled={loading || !input.trim()}
+                    title="Send completion"
+                    aria-label="Send completion"
+                  >
+                    {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                  </motion.button>
+                </form>
+                <div className="text-center mt-3">
+                  <span className="text-[10px] text-slate-500 font-sans text-pretty">
+                    CostOps can make mistakes. Consider verifying critical token optimizations.
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            /* =========================================
+               TAB 2: PROMPT OPTIMIZER STUDIO
+               ========================================= */
+            <motion.div 
+              key="optimizer-tab"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ type: "spring", stiffness: 100, damping: 20 }}
+              className="flex-1 p-6 overflow-hidden flex flex-col relative z-10"
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 min-h-0">
+                
+                {/* LEFT STUDIO PANEL (PREMIUM GLASS) */}
+                <div className="bg-slate-900/30 backdrop-blur-2xl border border-white/[0.06] shadow-2xl shadow-black/60 p-6 rounded-3xl flex flex-col justify-between transition-all duration-300 hover:border-white/10 overflow-hidden relative">
+                  <div className="flex flex-col flex-1 min-h-0">
+                    <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4 shrink-0 flex items-center gap-2">
+                      <Sparkles size={14} className="text-blue-400" />
+                      Input Raw Prompt
+                    </h2>
+                    <textarea
+                      className="w-full flex-1 bg-slate-950/40 backdrop-blur-md border border-white/5 rounded-2xl p-5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 resize-none font-sans text-sm text-pretty shadow-inner"
+                      placeholder="Draft your raw instructions here..."
+                      value={rawPrompt}
+                      onChange={(e) => setRawPrompt(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="mt-6 shrink-0 relative z-10">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleOptimize}
+                        disabled={isOptimizing || isGenerating || !rawPrompt.trim()}
+                        className="w-full bg-slate-800/80 hover:bg-slate-700 text-white border border-white/10 px-5 py-3 rounded-xl transition-all text-sm font-medium shadow-md flex justify-center items-center gap-2"
+                      >
+                        {isOptimizing ? <Loader2 size={16} className="animate-spin" /> : '⚡ Optimize Prompt'}
+                      </motion.button>
+                      
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleGenerate}
+                        disabled={isOptimizing || isGenerating || !rawPrompt.trim()}
+                        className="w-full bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/30 px-5 py-3 rounded-xl transition-all text-sm font-medium shadow-[0_0_20px_rgba(79,70,229,0.3)] flex justify-center items-center gap-2"
+                      >
+                        {isGenerating ? <Loader2 size={16} className="animate-spin" /> : '✨ Generate Master Prompt'}
+                      </motion.button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT EXPORTER PANEL (PREMIUM GLASS) */}
+                <div className="bg-slate-900/30 backdrop-blur-2xl border border-white/[0.06] shadow-2xl shadow-black/60 p-6 rounded-3xl flex flex-col relative transition-all duration-300 hover:border-white/10 overflow-hidden">
+                  <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4 shrink-0">Optimized Canonical Output</h2>
+                  
+                  <div className="absolute top-6 right-6 flex items-center gap-3 z-20">
+                    <AnimatePresence>
+                      {optimizedPrompt && (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.8 }} 
+                          animate={{ opacity: 1, scale: 1 }} 
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                          className="flex items-center gap-3"
+                        >
+                          <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={handleCopy}
+                            aria-label="Copy optimized prompt to clipboard"
+                            className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-800/80 backdrop-blur-md border border-white/10 text-slate-300 hover:text-white hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] transition-all duration-300"
+                          >
+                            {isCopied ? <Check size={14} className="text-emerald-400" /> : <Clipboard size={14} />}
+                          </motion.button>
+                          <motion.button 
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            className="bg-emerald-600/10 backdrop-blur-md text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/20 hover:border-emerald-400/60 hover:shadow-[0_0_15px_rgba(52,211,153,0.3)] font-bold text-xs px-4 py-2 rounded-xl transition-all duration-300"
+                          >
+                            🚀 Execute Live on Gemini
+                          </motion.button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {!optimizedPrompt ? (
+                    <div className="w-full flex-1 bg-slate-950/40 backdrop-blur-md border border-white/5 rounded-2xl p-6 flex flex-col items-center justify-center text-slate-500 text-sm shadow-inner">
+                      <motion.div
+                        animate={{ rotate: [0, 5, -5, 0] }}
+                        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                      >
+                        <Sparkles size={28} className="mb-4 opacity-20" />
+                      </motion.div>
+                      <p className="font-medium tracking-wide">Awaiting prompt processing...</p>
+                    </div>
+                  ) : (
+                    <textarea
+                      className="w-full flex-1 bg-slate-950/40 backdrop-blur-md border border-white/5 rounded-2xl p-5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 resize-none font-sans text-sm text-pretty shadow-inner"
+                      placeholder="Optimized prompt output..."
+                      value={optimizedPrompt}
+                      onChange={(e) => setOptimizedPrompt(e.target.value)}
+                    />
+                  )}
+
+                  <div className="mt-4 shrink-0 flex items-center justify-between">
+                    <div className="flex gap-4">
+                      <span className="tabular-nums text-xs text-slate-400 font-medium font-mono drop-shadow-md">
+                        Original: <span className="text-slate-200">{originalTokens ?? '--'}</span>
+                      </span>
+                      <span className="tabular-nums text-xs text-slate-400 font-medium font-mono drop-shadow-md">
+                        Generated: <span className="text-blue-300">{optimizedTokens ?? '--'}</span>
+                      </span>
+                      <span className="tabular-nums text-xs text-slate-400 font-medium font-mono drop-shadow-md">
+                        Saved: <span className="text-emerald-400">{savingsPercentage !== null ? savingsPercentage.toFixed(1) : '--'}%</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
       {/* Settings Modal */}
-      {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-          <div className="bg-slate-950 border border-slate-800 rounded-xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col transform opacity-100 scale-100 transition-all duration-200">
-            <div className="px-5 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
-              <h2 id="settings-title" className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                <Settings size={16} className="text-slate-400" />
-                Platform Settings
-              </h2>
-              <button 
-                onClick={() => setIsSettingsOpen(false)}
-                className="text-slate-500 hover:text-slate-300 p-1 rounded-md transition-colors"
-                aria-label="Close settings"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            
-            <div className="p-5 flex flex-col gap-6">
-              <div className="flex flex-col gap-3">
-                <div className="flex justify-between items-center">
-                  <h3 className="flex items-center gap-2 text-sm font-bold text-slate-200">
-                    <Key size={14} className="text-amber-400" />
-                    Upstream API Key
-                  </h3>
-                  {isBound(bindProvider) && (
-                    <span className="px-2 py-0.5 text-[10px] font-bold font-mono rounded bg-emerald-950/50 border border-emerald-900/50 text-emerald-400 tabular-nums">
-                      Bound Active
-                    </span>
-                  )}
-                </div>
-                
-                <p className="text-xs text-slate-400 text-pretty">
-                  Connect your personal API keys to run prompts against real models. Keys are encrypted symmetrically in the database.
-                </p>
-
-                <div className="flex flex-col gap-2 mt-2">
-                  <select
-                    className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm px-3 py-2 rounded-md focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-colors duration-200"
-                    value={bindProvider}
-                    onChange={(e) => setBindProvider(e.target.value)}
-                    aria-label="Select provider"
-                  >
-                    <option value="openai">OpenAI</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="anthropic">Anthropic</option>
-                  </select>
-                  
-                  <input
-                    type="password"
-                    placeholder="Paste API Key (sk-...)"
-                    className="w-full font-mono bg-slate-900 border border-slate-800 rounded-md px-3 py-2 text-slate-100 text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    aria-label="Enter API Key"
-                  />
-                  
-                  <div className="flex items-center gap-2 mt-1">
-                    <button
-                      onClick={handleBindKey}
-                      disabled={bindLoading || !apiKey.trim()}
-                      className="flex-1 py-2 bg-slate-100 hover:bg-white text-slate-900 rounded-md text-xs font-bold transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center h-9"
-                    >
-                      {bindLoading ? <Loader2 size={14} className="animate-spin" /> : 'Verify & Bind'}
-                    </button>
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" 
+            role="dialog" 
+            aria-modal="true" 
+            aria-labelledby="settings-title"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              className="bg-slate-950/90 backdrop-blur-2xl border border-white/10 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col"
+            >
+              <div className="px-6 py-5 border-b border-white/10 flex justify-between items-center bg-slate-900/50">
+                <h2 id="settings-title" className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                  <Settings size={16} className="text-slate-400" />
+                  Platform Settings
+                </h2>
+                <motion.button 
+                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="text-slate-500 hover:text-slate-300 p-1 rounded-lg transition-colors"
+                  aria-label="Close settings"
+                >
+                  <X size={16} />
+                </motion.button>
+              </div>
+              
+              <div className="p-6 flex flex-col gap-6">
+                <div className="flex flex-col gap-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="flex items-center gap-2 text-sm font-bold text-slate-200">
+                      <Key size={14} className="text-amber-400" />
+                      Upstream API Key
+                    </h3>
+                    {isBound(bindProvider) && (
+                      <span className="px-2.5 py-1 text-[10px] font-bold font-mono rounded-lg bg-emerald-950/50 border border-emerald-900/50 text-emerald-400 tabular-nums">
+                        Bound Active
+                      </span>
+                    )}
                   </div>
+                  
+                  <p className="text-xs text-slate-400 text-pretty leading-relaxed">
+                    Connect your personal API keys to run prompts against real models. Keys are encrypted symmetrically in the database.
+                  </p>
 
-                  {bindMessage && (
-                    <div className={`text-[11px] p-2 rounded mt-2 font-mono ${bindMessage.type === 'error' ? 'bg-red-950/40 text-red-400 border border-red-900/50' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50'}`}>
-                      {bindMessage.text}
+                  <div className="flex flex-col gap-3 mt-2">
+                    <select
+                      className="w-full bg-slate-900/60 backdrop-blur-md border border-white/10 text-slate-200 text-sm px-4 py-2.5 rounded-xl focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-colors duration-200"
+                      value={bindProvider}
+                      onChange={(e) => setBindProvider(e.target.value)}
+                      aria-label="Select provider"
+                    >
+                      <option value="openai">OpenAI</option>
+                      <option value="gemini">Google Gemini</option>
+                      <option value="anthropic">Anthropic</option>
+                    </select>
+                    
+                    <input
+                      type="password"
+                      placeholder="Paste API Key (sk-...)"
+                      className="w-full font-mono bg-slate-900/60 backdrop-blur-md border border-white/10 rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      aria-label="Enter API Key"
+                    />
+                    
+                    <div className="flex items-center gap-2 mt-2">
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleBindKey}
+                        disabled={bindLoading || !apiKey.trim()}
+                        className="flex-1 py-2.5 bg-slate-100 hover:bg-white text-slate-900 rounded-xl text-xs font-bold transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center h-10 shadow-md"
+                      >
+                        {bindLoading ? <Loader2 size={14} className="animate-spin" /> : 'Verify & Bind'}
+                      </motion.button>
                     </div>
-                  )}
+
+                    <AnimatePresence>
+                      {bindMessage && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className={`text-[11px] p-3 rounded-xl mt-2 font-mono ${bindMessage.type === 'error' ? 'bg-red-950/40 text-red-400 border border-red-900/50' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50'}`}
+                        >
+                          {bindMessage.text}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
