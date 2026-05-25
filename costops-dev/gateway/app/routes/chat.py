@@ -368,7 +368,10 @@ async def _persist_usage(
                     user_uuid = None
 
             # ── 1. Atomic wallet update ──────────────────
+            membership = None
+            team = None
             if user_uuid is not None:
+                # First update the member's wallet
                 stmt = (
                     update(TokenWallet)
                     .where(TokenWallet.user_id == user_uuid)
@@ -378,6 +381,28 @@ async def _persist_usage(
                     )
                 )
                 await session.execute(stmt)
+
+                # Fetch team membership and debit team owner if member belongs to a team
+                from app.models.models import TeamMember, Team
+                stmt_member = select(TeamMember).where(TeamMember.user_id == user_uuid)
+                res_member = await session.execute(stmt_member)
+                membership = res_member.scalar_one_or_none()
+                
+                if membership:
+                    stmt_team = select(Team).where(Team.id == membership.team_id)
+                    res_team = await session.execute(stmt_team)
+                    team = res_team.scalar_one_or_none()
+                    
+                    if team and team.owner_id != user_uuid:
+                        stmt_team_wallet = (
+                            update(TokenWallet)
+                            .where(TokenWallet.user_id == team.owner_id)
+                            .values(
+                                used_today_tokens=TokenWallet.used_today_tokens + total_tokens_used,
+                                total_tokens_all_time=TokenWallet.total_tokens_all_time + total_tokens_used,
+                            )
+                        )
+                        await session.execute(stmt_team_wallet)
 
             # ── 2. Insert prompt log ─────────────────────
             session_uuid = None
@@ -419,7 +444,7 @@ async def _persist_usage(
                 estimated_cost,
             )
 
-            # ── 3. WebSocket Real-time Broadcast ──────────
+            # ── 4. WebSocket Real-time Broadcast ──────────
             if user_uuid is not None:
                 from sqlalchemy import select
                 from app.routes.ws import ws_service
@@ -436,6 +461,20 @@ async def _persist_usage(
                         "monthlyBudget": wallet.daily_limit_tokens,
                     }
                     await ws_service.send_personal(user_id, ws_payload)
+
+                # Broadcast team owner's wallet update too if user is a member
+                if membership and team and team.owner_id != user_uuid:
+                    stmt_owner_select = select(TokenWallet).where(TokenWallet.user_id == team.owner_id)
+                    res_owner_select = await session.execute(stmt_owner_select)
+                    owner_wallet = res_owner_select.scalar_one_or_none()
+                    if owner_wallet:
+                        ws_owner_payload = {
+                            "userId": str(team.owner_id),
+                            "balanceTokens": max(owner_wallet.daily_limit_tokens - owner_wallet.used_today_tokens, 0),
+                            "usedTokens": owner_wallet.used_today_tokens,
+                            "monthlyBudget": owner_wallet.daily_limit_tokens,
+                        }
+                        await ws_service.send_personal(str(team.owner_id), ws_owner_payload)
 
         except Exception:
             await session.rollback()
@@ -764,29 +803,20 @@ async def optimize_prompt(payload: PromptOptimizeRequest):
         # Run optimization (Stage 2 & 3)
         optimized_text = _engine.optimize_user_prompt(raw_prompt)
         
-        # Fallback guard: if optimized prompt is longer or equal to original stripped text, return original stripped directly
-        if len(optimized_text) >= len(original_text_stripped):
-            optimized_text = original_text_stripped
-            original_tokens = _engine._estimate_tokens(original_text_stripped)
-            if original_tokens == 0 and len(original_text_stripped) > 0:
-                original_tokens = max(1, len(original_text_stripped) // 4)
-            optimized_tokens = original_tokens
-            savings_percentage = 0.0
-        else:
-            # Calculate tokens
-            original_tokens = _engine._estimate_tokens(raw_prompt)
-            if original_tokens == 0 and len(raw_prompt) > 0:
-                original_tokens = max(1, len(raw_prompt) // 4)
-                
-            optimized_tokens = _engine._estimate_tokens(optimized_text)
-            if optimized_tokens == 0 and len(optimized_text) > 0:
-                optimized_tokens = max(1, len(optimized_text) // 4)
+        # Calculate tokens naturally
+        original_tokens = _engine._estimate_tokens(raw_prompt)
+        if original_tokens == 0 and len(raw_prompt) > 0:
+            original_tokens = max(1, len(raw_prompt) // 4)
             
-            if original_tokens > 0:
-                savings = ((original_tokens - optimized_tokens) / original_tokens) * 100
-                savings_percentage = max(0.0, round(savings, 1))
-            else:
-                savings_percentage = 0.0
+        optimized_tokens = _engine._estimate_tokens(optimized_text)
+        if optimized_tokens == 0 and len(optimized_text) > 0:
+            optimized_tokens = max(1, len(optimized_text) // 4)
+        
+        if original_tokens > 0:
+            savings = ((original_tokens - optimized_tokens) / original_tokens) * 100
+            savings_percentage = max(0.0, round(savings, 1))
+        else:
+            savings_percentage = 0.0
 
         return OptimizeResponse(
             optimized_prompt=optimized_text,
@@ -816,9 +846,18 @@ async def generate_master_prompt(payload: PromptOptimizeRequest):
         raise HTTPException(status_code=400, detail="Gemini API Key missing or not configured for Prompt Expansion.")
         
     system_prompt = (
-        "You are an Expert Prompt Engineer. Take the user's short idea and EXPAND it into a highly "
-        "detailed, professional Master Prompt. Include sections for: Role, Context, Task, Constraints, "
-        "and Output Format. Return ONLY the markdown prompt text without any conversational pleasantries."
+        "You are an Expert Prompt Engineer. Your single task is to convert the user's conversational, informal input (often in Vietnamese with fluff like 'Chào AI', 'giúp tôi với') into a high-density, professional, industry-standard Master Prompt in technical English.\n\n"
+        "CRITICAL OUTPUT CONSTRAINTS:\n"
+        "1. Do NOT write any application source code (e.g., no python, javascript, sql blocks).\n"
+        "2. Do NOT output code blocks or full mock scripts.\n"
+        "3. Output ONLY the structured markdown blueprint of the prompt itself using exactly these sections:\n"
+        "   ## Master Prompt: [Title]\n"
+        "   ### Role\n"
+        "   ### Context\n"
+        "   ### Task\n"
+        "   ### Constraints\n"
+        "   ### Expected Output Format\n\n"
+        "Ensure the response is clean, direct, and completely free of conversational conversational filler from you. Output the prompt blueprint direct."
     )
     
     body = {

@@ -25,14 +25,14 @@ const TokenBar: React.FC<TokenBarProps> = ({
     'bg-blue-500 shadow-[0_0_10px_#3b82f6]';
 
   return (
-    <div className="w-full bg-slate-900/50 backdrop-blur-md border border-slate-800 rounded-lg p-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-lg" aria-label="Token budget status bar">
+    <div className="w-full bg-white dark:bg-slate-900/50 backdrop-blur-md border border-slate-200 dark:border-slate-800 rounded-lg p-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-md dark:shadow-lg" aria-label="Token budget status bar">
       <div className="flex items-center gap-2">
-        <span className="text-xs font-bold uppercase tracking-widest text-slate-400">{label}</span>
-        <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-blue-400 font-bold">{usedPercent.toFixed(1)}%</span>
+        <span className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">{label}</span>
+        <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-blue-650 dark:text-blue-400 font-bold">{usedPercent.toFixed(1)}%</span>
       </div>
 
       <div className="flex-1 relative w-full my-2 md:my-0">
-        <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden flex">
+        <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-950 rounded-full overflow-hidden flex">
           {/* Used bar progress */}
           <div
             className={`h-full transition-all duration-500 ${
@@ -55,12 +55,12 @@ const TokenBar: React.FC<TokenBarProps> = ({
         />
       </div>
 
-      <div className="font-mono text-xs text-slate-400 flex flex-wrap items-center gap-1.5 justify-end">
-        <span className="text-slate-200 font-bold">{used.toLocaleString()}</span>
-        <span className="text-slate-600">/</span>
+      <div className="font-mono text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-1.5 justify-end">
+        <span className="text-slate-800 dark:text-slate-200 font-bold">{used.toLocaleString()}</span>
+        <span className="text-slate-400 dark:text-slate-650">/</span>
         <span>{total.toLocaleString()} tokens</span>
         {saved > 0 && (
-          <span className="text-emerald-400 font-semibold ml-1.5">({saved.toLocaleString()} saved)</span>
+          <span className="text-emerald-600 dark:text-emerald-400 font-semibold ml-1.5">({saved.toLocaleString()} saved)</span>
         )}
       </div>
     </div>
