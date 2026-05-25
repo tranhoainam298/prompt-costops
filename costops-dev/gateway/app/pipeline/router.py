@@ -29,6 +29,9 @@ MODEL_CATALOG: dict[str, dict[str, float]] = {
         "deepseek-chat": 0.00014,
         "deepseek-coder": 0.00014,
     },
+    "gemini": {
+        "gemini-2.5-flash": 0.0014,
+    },
 }
 
 # Ordered cheapest-first for fallback selection

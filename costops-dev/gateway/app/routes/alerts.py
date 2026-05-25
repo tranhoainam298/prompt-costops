@@ -33,39 +33,44 @@ class AlertItem(BaseModel):
     created_at: str
 
 
-@router.get("", response_model=list[AlertItem])
+@router.get("")
 async def get_active_alerts(
     request: Request,
     db: AsyncSession = Depends(get_db)
-) -> list[AlertItem]:
+) -> Any:
     """Retrieve all unread diagnostic anomalies from the database."""
     user_id = getattr(request.state, "user_id", None) or "00000000-0000-0000-0000-000000000000"
     
     try:
         user_uuid = uuid.UUID(user_id)
     except ValueError:
-        return []
+        logger.warning(f"Invalid user_id uuid format: {user_id}")
+        return {"alerts": [], "status": "ok"}
 
-    stmt = (
-        select(CostAlert)
-        .where(CostAlert.user_id == user_uuid)
-        .where(CostAlert.is_read == False)
-        .order_by(CostAlert.created_at.desc())
-    )
-    result = await db.execute(stmt)
-    alerts = result.scalars().all()
-
-    return [
-        AlertItem(
-            id=str(alert.id),
-            user_id=str(alert.user_id),
-            alert_type=str(alert.alert_type.value),
-            message=alert.message,
-            is_read=alert.is_read,
-            created_at=alert.created_at.isoformat(),
+    try:
+        stmt = (
+            select(CostAlert)
+            .where(CostAlert.user_id == user_uuid)
+            .where(CostAlert.is_read == False)
+            .order_by(CostAlert.created_at.desc())
         )
-        for alert in alerts
-    ]
+        result = await db.execute(stmt)
+        alerts = result.scalars().all()
+
+        return [
+            AlertItem(
+                id=str(alert.id),
+                user_id=str(alert.user_id),
+                alert_type=str(alert.alert_type.value),
+                message=alert.message,
+                is_read=alert.is_read,
+                created_at=alert.created_at.isoformat(),
+            )
+            for alert in alerts
+        ]
+    except Exception as e:
+        logger.error(f"Failed to fetch active alerts from database: {str(e)}", exc_info=True)
+        return {"alerts": [], "status": "ok"}
 
 
 @router.post("/{alert_id}/read")

@@ -28,7 +28,7 @@ import logging
 from typing import Any, AsyncGenerator
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import update
@@ -36,15 +36,86 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
 from database import async_session_factory, get_db
-from app.models.models import PromptLog, TokenWallet
+from app.models.models import PromptLog, TokenWallet, ChatSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+
 from app.pipeline.engine import PromptOptimizationEngine
-from app.pipeline.router import MODEL_CATALOG
 from app.services.token_counter import TokenCounter
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 router = APIRouter(prefix="/v1", tags=["chat"])
+
+# ── Endpoints: Chat History ─────────────────────────────
+
+@router.get("/chat/conversations")
+async def get_conversations(request: Request):
+    """Return all chat sessions for the active user."""
+    user_id = getattr(request.state, "user_id", None) or "00000000-0000-0000-0000-000000000000"
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
+
+    async with async_session_factory() as session:
+        stmt = (
+            select(ChatSession)
+            .where(ChatSession.user_id == user_uuid)
+            .order_by(ChatSession.updated_at.desc())
+        )
+        result = await session.execute(stmt)
+        sessions = result.scalars().all()
+        return [
+            {
+                "id": str(s.id),
+                "title": s.title,
+                "created_at": s.created_at.isoformat(),
+                "updated_at": s.updated_at.isoformat(),
+            }
+            for s in sessions
+        ]
+
+
+@router.get("/chat/conversations/{session_id}")
+async def get_conversation_details(session_id: str, request: Request):
+    """Return prompt logs for a specific session."""
+    user_id = getattr(request.state, "user_id", None) or "00000000-0000-0000-0000-000000000000"
+    try:
+        user_uuid = uuid.UUID(user_id)
+        sess_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
+
+    async with async_session_factory() as session:
+        stmt = (
+            select(ChatSession)
+            .options(selectinload(ChatSession.prompt_logs))
+            .where(ChatSession.id == sess_uuid, ChatSession.user_id == user_uuid)
+        )
+        result = await session.execute(stmt)
+        chat_session = result.scalar_one_or_none()
+        if not chat_session:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+
+        # Sort logs by created_at
+        logs = sorted(chat_session.prompt_logs, key=lambda x: x.created_at)
+        return {
+            "id": str(chat_session.id),
+            "title": chat_session.title,
+            "created_at": chat_session.created_at.isoformat(),
+            "messages": [
+                {
+                    "id": str(l.id),
+                    "original_prompt": l.original_prompt,
+                    "model_used": l.model_used,
+                    "created_at": l.created_at.isoformat(),
+                    "completion_tokens": l.completion_tokens,
+                }
+                for l in logs
+            ]
+        }
 
 # ── Singletons ───────────────────────────────────────────
 
@@ -65,6 +136,10 @@ _PROVIDER_CONFIG: dict[str, dict[str, str]] = {
     "anthropic": {
         "base_url": "https://api.anthropic.com/v1",
         "key_attr": "anthropic_api_key",
+    },
+    "gemini": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "key_attr": "gemini_api_key",
     },
 }
 
@@ -87,8 +162,10 @@ class ChatCompletionRequest(BaseModel):
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     frequency_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
     presence_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
+    presence_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
     stream: bool = False
     user: str | None = None
+    session_id: str | None = None
 
 
 class UsageInfo(BaseModel):
@@ -99,6 +176,17 @@ class UsageInfo(BaseModel):
     prompt_tokens_before_optimization: int = 0
     tokens_saved: int = 0
     compression_ratio: float = 0.0
+
+
+class OptimizeRequest(BaseModel):
+    raw_prompt: str
+
+
+class OptimizeResponse(BaseModel):
+    optimized_prompt: str
+    original_tokens: int
+    optimized_tokens: int
+    savings_percentage: float
 
 
 class ChoiceMessage(BaseModel):
@@ -137,9 +225,32 @@ def _extract_last_user_message(messages: list[ChatMessage]) -> str:
 
 
 def _build_provider_headers(provider: str) -> dict[str, str]:
-    """Return the HTTP headers required by *provider*."""
+    """Return the HTTP headers required by *provider*.
+
+    Raises ``HTTPException(400)`` if the API key for the resolved
+    provider is empty, whitespace-only, or still contains a known
+    placeholder string — preventing malformed ``Authorization`` headers.
+    """
     cfg = _PROVIDER_CONFIG.get(provider, _PROVIDER_CONFIG["openai"])
-    api_key = getattr(settings, cfg["key_attr"], "")
+    raw_key: str = getattr(settings, cfg["key_attr"], "") or ""
+    api_key = raw_key.strip()
+
+    # ── Placeholder patterns that indicate an unconfigured key ──
+    _PLACEHOLDER_FRAGMENTS = (
+        "your_", "your-", "sk-your", "sk-ant-your",
+        "api_key_here", "api-key-here", "changeme",
+    )
+    is_placeholder = any(frag in api_key.lower() for frag in _PLACEHOLDER_FRAGMENTS)
+
+    if not api_key or is_placeholder:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Configuration Error: API Key for provider '{provider}' "
+                f"(env var: {cfg['key_attr'].upper()}) is missing or "
+                f"unconfigured in your gateway .env file."
+            ),
+        )
 
     if provider == "anthropic":
         return {
@@ -167,6 +278,7 @@ def _build_upstream_payload(
     optimized_messages: list[dict[str, str]],
     model_used: str,
     *,
+    provider: str = "",
     stream: bool,
 ) -> dict[str, Any]:
     """Assemble the JSON body sent to the upstream provider."""
@@ -175,10 +287,11 @@ def _build_upstream_payload(
         "messages": optimized_messages,
         "temperature": payload.temperature,
         "top_p": payload.top_p,
-        "frequency_penalty": payload.frequency_penalty,
-        "presence_penalty": payload.presence_penalty,
         "stream": stream,
     }
+    if provider != "gemini":
+        body["frequency_penalty"] = payload.frequency_penalty
+        body["presence_penalty"] = payload.presence_penalty
     if payload.max_tokens is not None:
         body["max_tokens"] = payload.max_tokens
     return body
@@ -190,7 +303,27 @@ def _estimate_cost(
     provider: str,
     model: str,
 ) -> float:
-    """Estimate USD cost from the MODEL_CATALOG cost-per-1K table."""
+    """Estimate USD cost from the MODEL_CATALOG cost-per-1K table.
+
+    For Gemini models, use exact per-token input/output pricing:
+      - gemini-2.5-flash input:  $0.30 / 1M tokens  ($0.0000003 / token)
+      - gemini-2.5-flash output: $2.50 / 1M tokens  ($0.0000025 / token)
+    """
+    # ── Gemini-specific granular pricing ──────────────────
+    _GEMINI_PRICING: dict[str, dict[str, float]] = {
+        "gemini-2.5-flash": {
+            "input_per_token": 0.0000003,   # $0.30 / 1M tokens
+            "output_per_token": 0.0000025,  # $2.50 / 1M tokens
+        },
+    }
+
+    if provider == "gemini" and model in _GEMINI_PRICING:
+        rates = _GEMINI_PRICING[model]
+        input_cost = prompt_tokens * rates["input_per_token"]
+        output_cost = completion_tokens * rates["output_per_token"]
+        return round(input_cost + output_cost, 8)
+
+    # ── Default blended cost-per-1K for all other providers
     cost_per_1k = MODEL_CATALOG.get(provider, {}).get(model, 0.005)
     return round((prompt_tokens + completion_tokens) / 1000.0 * cost_per_1k, 8)
 
@@ -210,6 +343,7 @@ async def _persist_usage(
     provider: str,
     compression_ratio: float,
     source_tool: str,
+    session_id: str | None = None,
 ) -> None:
     """
     Background task that runs **after** the response stream has finished.
@@ -246,8 +380,16 @@ async def _persist_usage(
                 await session.execute(stmt)
 
             # ── 2. Insert prompt log ─────────────────────
+            session_uuid = None
+            if session_id:
+                try:
+                    session_uuid = uuid.UUID(session_id)
+                except ValueError:
+                    pass
+
             log_entry = PromptLog(
                 user_id=user_uuid,
+                session_id=session_uuid,
                 original_prompt=original_prompt,
                 optimized_prompt=optimized_prompt,
                 original_tokens=original_tokens,
@@ -391,7 +533,7 @@ async def _stream_upstream(
 # ── Endpoint ─────────────────────────────────────────────
 
 
-@router.post("/chat/completions")
+@router.post("/chat/completions", response_model=None)
 async def chat_completions(
     payload: ChatCompletionRequest,
     request: Request,
@@ -420,8 +562,21 @@ async def chat_completions(
     original_tokens = _counter.count(user_text)
 
     # Resolve user identity (injected by AuthMiddleware)
-    user_id: str | None = getattr(request.state, "user_id", None) or payload.user or "00000000-0000-0000-0000-000000000000"
+    user_id_str: str | None = getattr(request.state, "user_id", None) or payload.user or "00000000-0000-0000-0000-000000000000"
     source_tool: str = request.headers.get("X-Source-Tool", "api")
+    
+    # Session handling: Create one if session_id is None
+    if not payload.session_id:
+        title = " ".join(user_text.split()[:5]) + "..." if user_text else "New Chat"
+        try:
+            user_uuid = uuid.UUID(user_id_str)
+            async with async_session_factory() as session:
+                new_session = ChatSession(user_id=user_uuid, title=title)
+                session.add(new_session)
+                await session.commit()
+                payload.session_id = str(new_session.id)
+        except ValueError:
+            pass # Invalid user_id fallback
 
     # ── 2. Optimise ──────────────────────────────────────
     result = await _engine.optimize(
@@ -451,12 +606,36 @@ async def chat_completions(
         else:
             optimized_messages.insert(0, {"role": msg.role, "content": msg.content})
 
+    # ── System Prompt Injection Middleware ──────────────────
+    SYSTEM_PROMPT = (
+        "[SYSTEM INSIGHT ENFORCER]\n"
+        "You are the CostOps Socratic AI Coach—a premium, high-density Senior DevOps & Cost-Aware Systems Architect. "
+        "You are embedded inside a token-optimization proxy platform.\n\n"
+        "STRICT OPERATIONAL RULES:\n"
+        "1. PERSONALITY: Never say friendly fluff or generic introductory statements (e.g., \"Chào bạn, tôi có thể giúp gì...\"). "
+        "Speak directly like a crisp terminal output or a senior technical lead.\n"
+        "2. CODE CONCISENESS: When the user asks for code or architecture fixes, strip away all verbose explanations. "
+        "Provide the clean, production-ready refactored code immediately using precise Markdown code blocks.\n"
+        "3. TOKEN-CONSCIOUSNESS: Every response you generate costs the user money. "
+        "Keep your text output dense, highly informative, and minimal. Optimize your own output tokens."
+    )
+
+    has_system = False
+    for msg in optimized_messages:
+        if msg["role"] == "system":
+            msg["content"] = f"{SYSTEM_PROMPT}\n\n{msg['content']}"
+            has_system = True
+            break
+
+    if not has_system:
+        optimized_messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+
     provider = result.selected_provider
     model_used = result.selected_model
     upstream_url = _build_upstream_url(provider)
     headers = _build_provider_headers(provider)
     body = _build_upstream_payload(
-        payload, optimized_messages, model_used, stream=payload.stream,
+        payload, optimized_messages, model_used, provider=provider, stream=payload.stream,
     )
 
     # ── 4a. Streaming mode ───────────────────────────────
@@ -481,7 +660,7 @@ async def chat_completions(
             est_completion_tokens = _counter.count(final_text) if final_text else 0
 
             await _persist_usage(
-                user_id=user_id,
+                user_id=user_id_str,
                 original_prompt=user_text,
                 optimized_prompt=result.optimized_text,
                 original_tokens=original_tokens,
@@ -492,18 +671,23 @@ async def chat_completions(
                 provider=provider,
                 compression_ratio=result.compression_ratio,
                 source_tool=source_tool,
+                session_id=payload.session_id,
             )
+
+        headers = {
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-CostOps-Request-Id": request_id,
+            "X-CostOps-Tokens-Saved": str(original_tokens - optimized_tokens),
+        }
+        if payload.session_id:
+            headers["X-CostOps-Session-Id"] = payload.session_id
 
         return StreamingResponse(
             _sse_generator(),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-                "X-CostOps-Request-Id": request_id,
-                "X-CostOps-Tokens-Saved": str(original_tokens - optimized_tokens),
-            },
+            headers=headers,
         )
 
     # ── 4b. Non-streaming mode ───────────────────────────
@@ -541,7 +725,7 @@ async def chat_completions(
     # Schedule background persistence
     background_tasks.add_task(
         _persist_usage,
-        user_id=user_id,
+        user_id=user_id_str,
         original_prompt=user_text,
         optimized_prompt=result.optimized_text,
         original_tokens=original_tokens,
@@ -552,6 +736,7 @@ async def chat_completions(
         provider=provider,
         compression_ratio=result.compression_ratio,
         source_tool=source_tool,
+        session_id=payload.session_id,
     )
 
     # Enrich the upstream response with CostOps metadata
@@ -563,3 +748,33 @@ async def chat_completions(
         upstream_data["usage"]["compression_ratio"] = result.compression_ratio
 
     return JSONResponse(content=upstream_data)
+
+
+@router.post("/prompt/optimize", response_model=OptimizeResponse)
+async def optimize_prompt(payload: OptimizeRequest):
+    """
+    Explicitly run Stage 2 & 3 optimizations without calling upstream APIs.
+    """
+    raw_prompt = payload.raw_prompt
+    
+    # Run optimization (Stage 2 & 3)
+    optimized_text = _engine.optimize_user_prompt(raw_prompt)
+    
+    # Calculate tokens
+    original_tokens = _engine._estimate_tokens(raw_prompt)
+    if original_tokens == 0 and len(raw_prompt) > 0:
+        original_tokens = max(1, len(raw_prompt) // 4)
+        
+    optimized_tokens = _engine._estimate_tokens(optimized_text)
+    if optimized_tokens == 0 and len(optimized_text) > 0:
+        optimized_tokens = max(1, len(optimized_text) // 4)
+    
+    tokens_saved = max(original_tokens - optimized_tokens, 0)
+    savings_percentage = round(1 - optimized_tokens / original_tokens, 4) if original_tokens > 0 else 0.0
+
+    return OptimizeResponse(
+        optimized_prompt=optimized_text,
+        original_tokens=original_tokens,
+        optimized_tokens=optimized_tokens,
+        savings_percentage=savings_percentage * 100
+    )
