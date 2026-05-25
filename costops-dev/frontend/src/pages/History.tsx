@@ -57,21 +57,21 @@ export const History: React.FC = () => {
   return (
     <div className="flex flex-col gap-6 w-full animate-fadeIn">
       <div>
-        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-100 to-slate-400 bg-clip-text text-transparent">
+        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 via-slate-800 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent">
           Prompt Optimization History Logs
         </h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
           Historical registry of optimization requests, estimated cost metrics, and differential prompt audits.
         </p>
       </div>
 
       {/* Structured developer-grade dense table wrapper */}
-      <div className="w-full bg-slate-900/50 backdrop-blur-md border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+      <div className="w-full bg-white dark:bg-slate-900/50 backdrop-blur-md border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-lg dark:shadow-2xl">
         <table className="w-full text-sm text-left border-collapse">
           
           {/* Dense Headers Enforcing uppercase monospace */}
           <thead>
-            <tr className="bg-slate-950 border-b border-slate-800 text-[10px] uppercase font-bold tracking-widest text-slate-400 font-mono">
+            <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase font-bold tracking-widest text-slate-555 dark:text-slate-400 font-mono">
               <th className="py-3.5 px-5 select-none">Request ID</th>
               <th className="py-3.5 px-5 select-none">Timestamp</th>
               <th className="py-3.5 px-5 select-none">Model</th>
@@ -88,11 +88,11 @@ export const History: React.FC = () => {
               
               /* Elegant empty-state rendered inside the table body shell */
               <tr>
-                <td colSpan={8} className="py-16 text-center text-slate-500 font-mono">
+                <td colSpan={8} className="py-16 text-center text-slate-400 dark:text-slate-500 font-mono">
                   <div className="flex flex-col items-center gap-3 justify-center">
-                    <FileSpreadsheet size={32} className="text-slate-700 animate-pulse-glow" />
-                    <span className="text-xs uppercase tracking-widest text-slate-400 font-bold">No Audit Logs Recorded</span>
-                    <span className="text-[11px] text-slate-500 max-w-xs leading-normal">
+                    <FileSpreadsheet size={32} className="text-slate-300 dark:text-slate-700 animate-pulse-glow" />
+                    <span className="text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold">No Audit Logs Recorded</span>
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500 max-w-xs leading-normal">
                       Historical optimization logs will appear here once executions are submitted in the Playground.
                     </span>
                   </div>
@@ -108,55 +108,55 @@ export const History: React.FC = () => {
                 return (
                   <React.Fragment key={log.id}>
                     <tr
-                      className={`border-b border-slate-800/80 cursor-pointer hover:bg-slate-800/30 transition-colors duration-150 ${
-                        isExpanded ? 'bg-indigo-950/10' : ''
+                      className={`border-b border-slate-150 dark:border-slate-800/80 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors duration-150 ${
+                        isExpanded ? 'bg-indigo-50/50 dark:bg-indigo-950/10' : ''
                       }`}
                       onClick={() => toggleRow(log.id)}
                     >
                       
                       {/* Compact Monospace Request ID */}
-                      <td className="py-3.5 px-5 font-mono text-xs text-blue-400 font-bold">
+                      <td className="py-3.5 px-5 font-mono text-xs text-blue-600 dark:text-blue-400 font-bold">
                         {log.id.slice(0, 8)}
                       </td>
 
                       {/* Timestamp */}
-                      <td className="py-3.5 px-5 text-xs text-slate-400 whitespace-nowrap">
+                      <td className="py-3.5 px-5 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">
                         {date}
                       </td>
 
                       {/* Model with Semantic Badges */}
                       <td className="py-3.5 px-5">
-                        <span className="inline-flex items-center text-[10px] font-bold font-mono px-2 py-0.5 rounded border border-blue-900/50 bg-blue-950/20 text-blue-400">
+                        <span className="inline-flex items-center text-[10px] font-bold font-mono px-2 py-0.5 rounded border border-blue-100 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400">
                           {log.modelUsed}
                         </span>
                       </td>
 
                       {/* Original Tokens */}
-                      <td className="py-3.5 px-5 font-mono text-xs text-slate-350 text-right">
+                      <td className="py-3.5 px-5 font-mono text-xs text-slate-600 dark:text-slate-300 text-right">
                         {log.originalTokens.toLocaleString()}
                       </td>
 
                       {/* Compressed Tokens */}
-                      <td className="py-3.5 px-5 font-mono text-xs text-slate-200 font-semibold text-right">
+                      <td className="py-3.5 px-5 font-mono text-xs text-slate-800 dark:text-slate-200 font-semibold text-right">
                         {log.optimizedTokens.toLocaleString()}
-                        <span className="text-[10px] text-emerald-400 ml-1 font-semibold">
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 ml-1 font-semibold">
                           (-{tokensSaved.toLocaleString()})
                         </span>
                       </td>
 
                       {/* Saved (%) */}
-                      <td className="py-3.5 px-5 font-mono text-xs text-emerald-400 font-bold text-right">
+                      <td className="py-3.5 px-5 font-mono text-xs text-emerald-600 dark:text-emerald-400 font-bold text-right">
                         {(log.compressionRatio * 100).toFixed(1)}%
                       </td>
 
                       {/* Est. Cost */}
-                      <td className="py-3.5 px-5 font-mono text-xs text-purple-400 font-bold text-right">
+                      <td className="py-3.5 px-5 font-mono text-xs text-purple-600 dark:text-purple-400 font-bold text-right">
                         ${log.estimatedCostUsd.toFixed(4)}
                       </td>
 
                       {/* Action toggle trigger */}
                       <td className="py-3.5 px-5 text-center">
-                        <button className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 bg-slate-800/60 hover:bg-slate-700/80 px-2.5 py-1 rounded transition-colors">
+                        <button className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-550 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 hover:bg-slate-200 dark:hover:bg-slate-700/80 px-2.5 py-1 rounded transition-colors">
                           <span>{isExpanded ? 'Hide' : 'View'}</span>
                           {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                         </button>
@@ -166,8 +166,8 @@ export const History: React.FC = () => {
 
                     {/* Expandable row content */}
                     {isExpanded && (
-                      <tr className="bg-slate-950/40">
-                        <td colSpan={8} className="p-5 border-b border-slate-800">
+                      <tr className="bg-slate-50/50 dark:bg-slate-950/40">
+                        <td colSpan={8} className="p-5 border-b border-slate-150 dark:border-slate-800">
                           <div className="w-full transition-all duration-300">
                             <PromptDiff
                               original={log.originalPrompt}

@@ -323,7 +323,7 @@ const Playground: React.FC = () => {
   };
 
   return (
-    <div className="flex w-full h-dvh bg-[#030712] text-slate-100 overflow-hidden font-sans relative">
+    <div className="flex w-full h-dvh bg-white dark:bg-[#030712] text-slate-900 dark:text-slate-100 overflow-hidden font-sans relative">
       <style>{`
         @keyframes shimmer {
           0% { transform: translateX(-150%) skewX(-20deg); }
@@ -357,12 +357,12 @@ const Playground: React.FC = () => {
       </div>
 
       {/* Left Workspace Sidebar */}
-      <aside className="w-64 bg-slate-950/80 backdrop-blur-xl border-r border-white/5 p-3 flex flex-col h-full shrink-0 z-20 shadow-2xl">
+      <aside className="w-64 bg-slate-50/90 dark:bg-slate-950/80 backdrop-blur-xl border-r border-slate-200 dark:border-white/5 p-3 flex flex-col h-full shrink-0 z-20 shadow-lg dark:shadow-2xl">
         <motion.button 
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={handleNewChat}
-          className="w-full py-2.5 bg-slate-900 border border-white/5 rounded-xl hover:bg-slate-800 hover:border-white/10 text-xs font-semibold tracking-wide transition-colors duration-200 flex items-center gap-2 mb-4 px-4 shadow-sm"
+          className="w-full py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-350 dark:hover:border-white/10 text-xs font-semibold tracking-wide text-slate-800 dark:text-slate-200 transition-colors duration-200 flex items-center gap-2 mb-4 px-4 shadow-sm"
         >
           <Plus size={16} /> New Chat
         </motion.button>
@@ -374,7 +374,7 @@ const Playground: React.FC = () => {
               key={s.id}
               onClick={() => loadSession(s.id)}
               className={`text-left text-xs p-2 rounded-lg truncate text-pretty transition-all duration-200 flex items-center gap-2 ${
-                activeSessionId === s.id ? 'bg-slate-800 text-slate-200 font-medium border border-white/5' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-300 border border-transparent'
+                activeSessionId === s.id ? 'bg-slate-200 dark:bg-slate-800 text-slate-850 dark:text-slate-200 font-semibold border border-slate-300 dark:border-white/5' : 'text-slate-650 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 hover:text-slate-800 dark:hover:text-slate-300 border border-transparent'
               }`}
             >
               <MessageSquare size={14} className="shrink-0" />
@@ -383,14 +383,14 @@ const Playground: React.FC = () => {
           ))}
         </div>
 
-        <div className="mt-auto pt-3 border-t border-white/5 flex items-center justify-between">
+        <div className="mt-auto pt-3 border-t border-slate-200 dark:border-white/5 flex items-center justify-between">
           <motion.button
             whileHover={{ scale: 1.1, rotate: 90 }}
             whileTap={{ scale: 0.9 }}
             transition={{ type: "spring", stiffness: 200, damping: 15 }}
             onClick={() => setIsSettingsOpen(true)}
             aria-label="Open Platform Settings"
-            className="w-10 h-10 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 flex items-center justify-center transition-colors duration-200"
+            className="w-10 h-10 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 flex items-center justify-center transition-colors duration-200"
           >
             <Settings size={20} />
           </motion.button>
@@ -400,13 +400,13 @@ const Playground: React.FC = () => {
       {/* Main Console Sandbox */}
       <main className="flex-1 flex flex-col h-full relative z-10" aria-label="Interactive Sandbox Console">
         {/* Header */}
-        <header className="px-6 py-4 border-b border-white/5 bg-slate-950/60 backdrop-blur-2xl flex justify-between items-center z-20 shrink-0 shadow-lg">
+        <header className="px-6 py-4 border-b border-slate-200 dark:border-white/5 bg-white/80 dark:bg-slate-950/60 backdrop-blur-2xl flex justify-between items-center z-20 shrink-0 shadow-sm dark:shadow-lg">
           <div className="flex items-center gap-3">
-            <Sparkles size={16} className="text-blue-400" />
-            <h1 className="text-sm font-bold font-mono text-slate-300 uppercase tracking-widest">Interactive Console</h1>
+            <Sparkles size={16} className="text-blue-550 dark:text-blue-400" />
+            <h1 className="text-sm font-bold font-mono text-slate-750 dark:text-slate-300 uppercase tracking-widest">Interactive Console</h1>
             
             <select
-              className="ml-4 bg-slate-900 border border-white/5 text-slate-300 text-xs px-3 py-1.5 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono cursor-pointer transition-colors duration-200 shadow-inner"
+              className="ml-4 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/5 text-slate-700 dark:text-slate-300 text-xs px-3 py-1.5 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono cursor-pointer transition-colors duration-200 shadow-sm dark:shadow-inner"
               value={model}
               onChange={(e) => setModel(e.target.value)}
             >
@@ -421,7 +421,7 @@ const Playground: React.FC = () => {
 
         {/* Animated Tab Switcher Container */}
         <div className="px-6 pt-6 bg-transparent shrink-0">
-          <div className="bg-slate-900/40 backdrop-blur-xl p-1.5 rounded-2xl flex border border-white/5 w-fit shadow-xl shadow-black/40">
+          <div className="bg-slate-100/80 dark:bg-slate-900/40 backdrop-blur-xl p-1.5 rounded-2xl flex border border-slate-200 dark:border-white/5 w-fit shadow-md dark:shadow-xl dark:shadow-black/40">
             {['chat', 'optimizer'].map((tab) => (
               <button
                 key={tab}
@@ -431,11 +431,11 @@ const Playground: React.FC = () => {
                 {activeTab === tab && (
                   <motion.div
                     layoutId="activeTabPill"
-                    className="absolute inset-0 bg-slate-800 border border-white/10 rounded-xl shadow-md"
+                    className="absolute inset-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-xl shadow-sm dark:shadow-md"
                     transition={{ type: "spring", stiffness: 300, damping: 25 }}
                   />
                 )}
-                <span className={`relative z-10 ${activeTab === tab ? 'text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
+                <span className={`relative z-10 ${activeTab === tab ? 'text-slate-900 dark:text-slate-100 font-bold' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-250 font-medium'}`}>
                   {tab === 'chat' ? '💬 Live Agent Chat' : '⚡ Prompt Optimizer Studio'}
                 </span>
               </button>
@@ -465,11 +465,11 @@ const Playground: React.FC = () => {
                     transition={{ type: "spring", stiffness: 100, damping: 20, delay: 0.1 }}
                     className="m-auto text-center max-w-sm flex flex-col items-center gap-4 mt-32"
                   >
-                    <div className="w-16 h-16 rounded-3xl bg-slate-900/60 backdrop-blur-xl border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.5)]">
-                      <Bot size={32} className="text-slate-400" />
+                    <div className="w-16 h-16 rounded-3xl bg-slate-100 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200 dark:border-white/10 flex items-center justify-center shadow-md dark:shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+                      <Bot size={32} className="text-slate-500 dark:text-slate-400" />
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-slate-200 font-mono uppercase tracking-wider">Console Sandbox</p>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200 font-mono uppercase tracking-wider">Console Sandbox</p>
                       <p className="text-xs text-slate-500 mt-2 text-pretty leading-relaxed">
                         Submit a prompt to test dynamic contextual compression. Output statistics will reflect real-time budget optimization.
                       </p>
@@ -486,16 +486,16 @@ const Playground: React.FC = () => {
                         msg.role === 'user' ? 'self-end flex-row-reverse' : 'self-start'
                       }`}
                     >
-                      <div className={`w-10 h-10 shrink-0 rounded-2xl flex items-center justify-center shadow-lg border border-white/5 ${
-                        msg.role === 'user' ? 'bg-blue-600/20 backdrop-blur-md text-blue-300' : 'bg-slate-800/60 backdrop-blur-md text-slate-300'
+                      <div className={`w-10 h-10 shrink-0 rounded-2xl flex items-center justify-center shadow-md dark:shadow-lg border border-slate-200 dark:border-white/5 ${
+                        msg.role === 'user' ? 'bg-blue-50 dark:bg-blue-600/20 backdrop-blur-md text-blue-650 dark:text-blue-300' : 'bg-slate-100 dark:bg-slate-800/60 backdrop-blur-md text-slate-600 dark:text-slate-300'
                       }`}>
                         {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
                       </div>
                       <div
-                        className={`px-5 py-4 rounded-3xl text-sm leading-relaxed shadow-xl backdrop-blur-xl border border-white/5 ${
+                        className={`px-5 py-4 rounded-3xl text-sm leading-relaxed shadow-sm dark:shadow-xl backdrop-blur-xl border border-slate-150 dark:border-white/5 ${
                           msg.role === 'user'
-                            ? 'bg-blue-900/30 text-blue-100 rounded-tr-sm'
-                            : 'bg-slate-900/40 text-slate-200 rounded-tl-sm'
+                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 rounded-tr-sm'
+                            : 'bg-slate-50 dark:bg-slate-900/40 text-slate-850 dark:text-slate-200 rounded-tl-sm'
                         }`}
                       >
                         <p className="whitespace-pre-wrap text-pretty">{msg.content}</p>
@@ -512,19 +512,19 @@ const Playground: React.FC = () => {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="px-6 py-3 border-t border-white/5 bg-slate-900/30 backdrop-blur-xl flex flex-wrap gap-3 overflow-hidden" 
+                    className="px-6 py-3 border-t border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-slate-900/30 backdrop-blur-xl flex flex-wrap gap-3 overflow-hidden" 
                     aria-label="Completion metadata stats"
                   >
-                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-slate-950/80 border border-white/5 text-slate-400 tabular-nums shadow-inner">
+                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-white/5 text-slate-650 dark:text-slate-400 tabular-nums shadow-sm">
                       Prompt: {usage.prompt_tokens}
                     </span>
-                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-slate-950/80 border border-white/5 text-slate-400 tabular-nums shadow-inner">
+                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-white/5 text-slate-650 dark:text-slate-400 tabular-nums shadow-sm">
                       Completion: {usage.completion_tokens}
                     </span>
-                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-emerald-950/30 border border-emerald-900/30 text-emerald-400 tabular-nums shadow-inner">
+                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/30 text-emerald-700 dark:text-emerald-400 tabular-nums shadow-sm">
                       Saved: {usage.tokens_saved}
                     </span>
-                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-amber-950/30 border border-amber-900/30 text-amber-400 tabular-nums shadow-inner">
+                    <span className="font-mono text-[10px] font-bold px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/30 text-amber-700 dark:text-amber-400 tabular-nums shadow-sm">
                       Saved Ratio: {(usage.compression_ratio * 100).toFixed(1)}%
                     </span>
                   </motion.div>
@@ -532,13 +532,13 @@ const Playground: React.FC = () => {
               </AnimatePresence>
 
               {/* Code Input Form */}
-              <div className="p-6 bg-slate-950/60 backdrop-blur-2xl border-t border-white/5 shrink-0 z-20">
+              <div className="p-6 bg-white dark:bg-slate-950/60 backdrop-blur-2xl border-t border-slate-200 dark:border-white/5 shrink-0 z-20">
                 <form 
-                  className="max-w-4xl mx-auto bg-slate-900/60 backdrop-blur-xl border border-white/10 rounded-2xl flex gap-2 items-end p-2 shadow-2xl focus-within:ring-2 focus-within:ring-slate-700/50 transition-all duration-300"
+                  className="max-w-4xl mx-auto bg-slate-50 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200 dark:border-white/10 rounded-2xl flex gap-2 items-end p-2 shadow-md dark:shadow-2xl focus-within:ring-2 focus-within:ring-slate-300 dark:focus-within:ring-slate-700/50 transition-all duration-300"
                   onSubmit={handleSubmit}
                 >
                   <textarea
-                    className="flex-1 font-sans bg-transparent border-none p-3 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-0 resize-none min-h-[50px] max-h-[250px]"
+                    className="flex-1 font-sans bg-transparent border-none p-3 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-0 resize-none min-h-[50px] max-h-[250px]"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     placeholder="Message CostOps..."
@@ -555,7 +555,7 @@ const Playground: React.FC = () => {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     type="submit"
-                    className="w-11 h-11 mb-1 mr-1 rounded-xl bg-slate-100 hover:bg-white text-slate-900 flex items-center justify-center transition-colors duration-200 shrink-0 disabled:opacity-50 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed shadow-lg"
+                    className="w-11 h-11 mb-1 mr-1 rounded-xl bg-slate-950 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-white text-white dark:text-slate-900 flex items-center justify-center transition-colors duration-200 shrink-0 disabled:opacity-50 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-500 disabled:cursor-not-allowed shadow-md dark:shadow-lg"
                     disabled={loading || !input.trim()}
                     title="Send completion"
                     aria-label="Send completion"
@@ -585,14 +585,14 @@ const Playground: React.FC = () => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 min-h-0">
                 
                 {/* LEFT STUDIO PANEL (PREMIUM GLASS) */}
-                <div className="bg-slate-900/30 backdrop-blur-2xl border border-white/[0.06] shadow-2xl shadow-black/60 p-6 rounded-3xl flex flex-col justify-between transition-all duration-300 hover:border-white/10 overflow-hidden relative">
+                <div className="bg-slate-50 dark:bg-slate-900/30 backdrop-blur-2xl border border-slate-200 dark:border-white/[0.06] shadow-lg dark:shadow-2xl dark:shadow-black/60 p-6 rounded-3xl flex flex-col justify-between transition-all duration-300 hover:border-slate-350 dark:hover:border-white/10 overflow-hidden relative">
                   <div className="flex flex-col flex-1 min-h-0">
-                    <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4 shrink-0 flex items-center gap-2">
-                      <Sparkles size={14} className="text-blue-400" />
+                    <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-4 shrink-0 flex items-center gap-2">
+                      <Sparkles size={14} className="text-blue-550 dark:text-blue-400" />
                       Input Raw Prompt
                     </h2>
                     <textarea
-                      className="w-full flex-1 bg-slate-950/40 backdrop-blur-md border border-white/5 rounded-2xl p-5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 resize-none font-sans text-sm text-pretty shadow-inner"
+                      className="w-full flex-1 bg-white dark:bg-slate-950/40 backdrop-blur-md border border-slate-200 dark:border-white/5 rounded-2xl p-5 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 resize-none font-sans text-sm text-pretty shadow-sm dark:shadow-inner"
                       placeholder="Draft your raw instructions here..."
                       value={rawPrompt}
                       onChange={(e) => setRawPrompt(e.target.value)}
@@ -606,7 +606,7 @@ const Playground: React.FC = () => {
                         whileTap={{ scale: 0.98 }}
                         onClick={handleOptimize}
                         disabled={isOptimizing || isGenerating || !rawPrompt.trim()}
-                        className="w-full bg-slate-800/80 hover:bg-slate-700 text-white border border-white/10 px-5 py-3 rounded-xl transition-all text-sm font-medium shadow-md flex justify-center items-center gap-2"
+                        className="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-slate-800 dark:text-white border border-slate-200 dark:border-white/10 px-5 py-3 rounded-xl transition-all text-sm font-medium shadow-sm flex justify-center items-center gap-2"
                       >
                         {isOptimizing ? <Loader2 size={16} className="animate-spin" /> : '⚡ Optimize Prompt'}
                       </motion.button>
@@ -625,8 +625,8 @@ const Playground: React.FC = () => {
                 </div>
 
                 {/* RIGHT EXPORTER PANEL (PREMIUM GLASS) */}
-                <div className="bg-slate-900/30 backdrop-blur-2xl border border-white/[0.06] shadow-2xl shadow-black/60 p-6 rounded-3xl flex flex-col relative transition-all duration-300 hover:border-white/10 overflow-hidden">
-                  <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4 shrink-0">Optimized Canonical Output</h2>
+                <div className="bg-slate-50 dark:bg-slate-900/30 backdrop-blur-2xl border border-slate-200 dark:border-white/[0.06] shadow-lg dark:shadow-2xl dark:shadow-black/60 p-6 rounded-3xl flex flex-col relative transition-all duration-300 hover:border-slate-350 dark:hover:border-white/10 overflow-hidden">
+                  <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-4 shrink-0">Optimized Canonical Output</h2>
                   
                   <div className="absolute top-6 right-6 flex items-center gap-3 z-20">
                     <AnimatePresence>
@@ -643,7 +643,7 @@ const Playground: React.FC = () => {
                             whileTap={{ scale: 0.95 }}
                             onClick={handleCopy}
                             aria-label="Copy optimized prompt to clipboard"
-                            className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-800/80 backdrop-blur-md border border-white/10 text-slate-300 hover:text-white hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] transition-all duration-300"
+                            className="flex items-center justify-center w-9 h-9 rounded-xl bg-white dark:bg-slate-800/80 backdrop-blur-md border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:border-slate-400/50 hover:shadow-sm dark:hover:shadow-[0_0_15px_rgba(255,255,255,0.1)] transition-all duration-300"
                           >
                             {isCopied ? <Check size={14} className="text-emerald-400" /> : <Clipboard size={14} />}
                           </motion.button>
@@ -660,7 +660,7 @@ const Playground: React.FC = () => {
                   </div>
 
                   {!optimizedPrompt ? (
-                    <div className="w-full flex-1 bg-slate-950/40 backdrop-blur-md border border-white/5 rounded-2xl p-6 flex flex-col items-center justify-center text-slate-500 text-sm shadow-inner">
+                    <div className="w-full flex-1 bg-white dark:bg-slate-950/40 backdrop-blur-md border border-slate-200 dark:border-white/5 rounded-2xl p-6 flex flex-col items-center justify-center text-slate-500 text-sm shadow-sm dark:shadow-inner">
                       <motion.div
                         animate={{ rotate: [0, 5, -5, 0] }}
                         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
@@ -671,7 +671,7 @@ const Playground: React.FC = () => {
                     </div>
                   ) : (
                     <textarea
-                      className="w-full flex-1 bg-slate-950/40 backdrop-blur-md border border-white/5 rounded-2xl p-5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 resize-none font-sans text-sm text-pretty shadow-inner"
+                      className="w-full flex-1 bg-white dark:bg-slate-950/40 backdrop-blur-md border border-slate-200 dark:border-white/5 rounded-2xl p-5 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 resize-none font-sans text-sm text-pretty shadow-sm dark:shadow-inner"
                       placeholder="Optimized prompt output..."
                       value={optimizedPrompt}
                       onChange={(e) => setOptimizedPrompt(e.target.value)}
@@ -680,14 +680,14 @@ const Playground: React.FC = () => {
 
                   <div className="mt-4 shrink-0 flex items-center justify-between">
                     <div className="flex gap-4">
-                      <span className="tabular-nums text-xs text-slate-400 font-medium font-mono drop-shadow-md">
-                        Original: <span className="text-slate-200">{originalTokens ?? '--'}</span>
+                      <span className="tabular-nums text-xs text-slate-500 dark:text-slate-400 font-medium font-mono drop-shadow-md">
+                        Original: <span className="text-slate-800 dark:text-slate-200">{originalTokens ?? '--'}</span>
                       </span>
-                      <span className="tabular-nums text-xs text-slate-400 font-medium font-mono drop-shadow-md">
-                        Generated: <span className="text-blue-300">{optimizedTokens ?? '--'}</span>
+                      <span className="tabular-nums text-xs text-slate-500 dark:text-slate-400 font-medium font-mono drop-shadow-md">
+                        Generated: <span className="text-blue-600 dark:text-blue-300">{optimizedTokens ?? '--'}</span>
                       </span>
-                      <span className="tabular-nums text-xs text-slate-400 font-medium font-mono drop-shadow-md">
-                        Saved: <span className="text-emerald-400">{savingsPercentage !== null ? savingsPercentage.toFixed(1) : '--'}%</span>
+                      <span className="tabular-nums text-xs text-slate-500 dark:text-slate-400 font-medium font-mono drop-shadow-md">
+                        Saved: <span className="text-emerald-650 dark:text-emerald-400">{savingsPercentage !== null ? savingsPercentage.toFixed(1) : '--'}%</span>
                       </span>
                     </div>
                   </div>

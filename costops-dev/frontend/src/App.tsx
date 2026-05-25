@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import Dashboard from './pages/Dashboard';
 import Playground from './pages/Playground';
 import History from './pages/History';
+import Teams from './pages/Teams';
 import TokenBar from './components/TokenBar';
 import { useWallet } from './hooks/useWallet';
-import { Sun, Moon, Monitor, LayoutDashboard, Terminal, History as HistoryIcon, Zap } from 'lucide-react';
+import { Sun, Moon, Monitor, LayoutDashboard, Terminal, History as HistoryIcon, Zap, Users } from 'lucide-react';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'playground' | 'history'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'playground' | 'history' | 'teams'>('dashboard');
   const { balance, loading, error } = useWallet();
 
   // Theme Sync hook supporting 'light' | 'dark' | 'system'
@@ -65,6 +66,8 @@ const App: React.FC = () => {
         return <Playground />;
       case 'history':
         return <History />;
+      case 'teams':
+        return <Teams />;
       default:
         return <Dashboard />;
     }
@@ -130,6 +133,19 @@ const App: React.FC = () => {
           >
             <HistoryIcon size={15} />
             <span>Audit History</span>
+          </button>
+
+          <button
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium tracking-wide transition-all rounded-lg duration-200 cursor-pointer ${
+              activeTab === 'teams'
+                ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-slate-700/50'
+                : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-900 border border-transparent'
+            }`}
+            onClick={() => setActiveTab('teams')}
+            aria-label="Manage Workspace Teams"
+          >
+            <Users size={15} />
+            <span>Workspace Teams</span>
           </button>
         </nav>
 

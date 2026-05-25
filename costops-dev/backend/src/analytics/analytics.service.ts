@@ -141,4 +141,17 @@ export class AnalyticsService {
       count: g._count.modelUsed,
     }));
   }
+
+  async getHistory(userId: string, limit: number = 50): Promise<any[]> {
+    this.logger.debug(`Fetching real DB prompt log history for user ${userId}, limit: ${limit}`);
+    return this.prisma.promptLog.findMany({
+      where: {
+        userId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: limit,
+    });
+  }
 }

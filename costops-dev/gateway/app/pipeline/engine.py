@@ -107,11 +107,10 @@ class PromptOptimizationEngine:
         # ── Stage 2 & 3: Advanced Semantic Prompt Optimizer
         if enable_compression or enable_standardization:
             optimized_text = self.optimize_user_prompt(original_text)
-            original_stripped = original_text.strip()
-            if len(optimized_text) >= len(original_stripped):
-                text = original_stripped
-            else:
+            if optimized_text:
                 text = optimized_text
+            else:
+                text = original_text.strip()
             stages_applied.extend(["compress_prompt", "template_standardizer"])
 
         # ── Compute savings ──────────────────────────────
@@ -152,6 +151,7 @@ class PromptOptimizationEngine:
         # Retrieve Gemini key from config or environment
         settings = get_settings()
         api_key = getattr(settings, "gemini_api_key", None) or os.getenv("GEMINI_API_KEY")
+        print(f"CRITICAL LOG - Is API Key loaded? {bool(api_key)}")
         if not api_key:
             logger.warning("GEMINI_API_KEY not found in settings or env. Falling back to rule-based compression.")
             return self._fallback_rule_based(raw_prompt)
@@ -183,13 +183,12 @@ class PromptOptimizationEngine:
                     if optimized_text:
                         logger.info("Stage 2 & 3 — dynamic semantic optimization succeeded")
                         return optimized_text.strip()
-                logger.warning(f"Gemini API returned status code {response.status_code}: {response.text}")
+                print(f"GEMINI API EXECUTION FAILED with status {response.status_code}: {response.text}")
+                response.raise_for_status()
         except Exception as e:
+            print(f"GEMINI API EXECUTION FAILED: {str(e)}")
             logger.error(f"Error during dynamic semantic optimization: {str(e)}")
-
-        # Fallback if LLM call fails
-        logger.info("Falling back to rule-based compression due to API failure")
-        return self._fallback_rule_based(raw_prompt)
+            raise e
 
     def _fallback_rule_based(self, raw_prompt: str) -> str:
         """Rule-based fallback optimization when LLM optimization fails."""
