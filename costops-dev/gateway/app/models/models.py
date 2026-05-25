@@ -109,6 +109,9 @@ class User(Base):
     api_keys: Mapped[list[ApiKey]] = relationship(
         "ApiKey", back_populates="user", lazy="selectin",
     )
+    chat_sessions: Mapped[list[ChatSession]] = relationship(
+        "ChatSession", back_populates="user", lazy="noload",
+    )
     routing_rules: Mapped[list[RoutingRule]] = relationship(
         "RoutingRule", back_populates="user", lazy="selectin",
     )
@@ -343,6 +346,46 @@ class RoutingRule(Base):
 
 
 # ═════════════════════════════════════════════════════════
+#  ChatSession
+# ═════════════════════════════════════════════════════════
+
+class ChatSession(Base):
+    """A logical conversation session grouping multiple prompt logs."""
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_new_uuid,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(128), nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False, onupdate=_utcnow,
+    )
+
+    # ── Relationships ────────────────────────────────────
+    user: Mapped[User] = relationship(
+        "User", back_populates="chat_sessions", lazy="selectin",
+    )
+    prompt_logs: Mapped[list[PromptLog]] = relationship(
+        "PromptLog", back_populates="session", lazy="noload",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatSession id={self.id} title={self.title!r}>"
+
+
+# ═════════════════════════════════════════════════════════
 #  PromptLog
 # ═════════════════════════════════════════════════════════
 
@@ -357,6 +400,12 @@ class PromptLog(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -383,6 +432,9 @@ class PromptLog(Base):
     # ── Relationships ────────────────────────────────────
     user: Mapped[User | None] = relationship(
         "User", back_populates="prompt_logs", lazy="selectin",
+    )
+    session: Mapped[ChatSession | None] = relationship(
+        "ChatSession", back_populates="prompt_logs", lazy="selectin",
     )
     explanations: Mapped[list[AIExplanation]] = relationship(
         "AIExplanation", back_populates="prompt_log", lazy="selectin",

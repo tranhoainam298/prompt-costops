@@ -6,7 +6,7 @@ services:
     container_name: costops-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-costops}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-costops_secret}

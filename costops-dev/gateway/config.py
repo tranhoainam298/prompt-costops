@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # ── Database ─────────────────────────────────────────
-    database_url: str = "postgresql+asyncpg://costops:costops_secret@localhost:5432/costops_db"
+    database_url: str = "postgresql+asyncpg://costops:costops_secret@localhost:5433/costops_db"
 
     # ── Redis ────────────────────────────────────────────
     redis_url: str = "redis://localhost:6379/0"
@@ -32,12 +32,13 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     deepseek_api_key: str = ""
+    gemini_api_key: str = ""
 
     # ── Rate Limits ──────────────────────────────────────
     default_rate_limit: int = 60
     default_monthly_token_budget: int = 1_000_000
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {"env_file": [".env", "../.env"], "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 @lru_cache()
