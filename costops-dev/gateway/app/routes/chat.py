@@ -178,7 +178,7 @@ class UsageInfo(BaseModel):
     compression_ratio: float = 0.0
 
 
-class OptimizeRequest(BaseModel):
+class PromptOptimizeRequest(BaseModel):
     raw_prompt: str
 
 
@@ -751,30 +751,103 @@ async def chat_completions(
 
 
 @router.post("/prompt/optimize", response_model=OptimizeResponse)
-async def optimize_prompt(payload: OptimizeRequest):
+async def optimize_prompt(payload: PromptOptimizeRequest):
     """
     Explicitly run Stage 2 & 3 optimizations without calling upstream APIs.
     """
+    print(f"CRITICAL GATEWAY LOG - Received raw_prompt: {payload.raw_prompt}")
+    
+    try:
+        raw_prompt = payload.raw_prompt
+        original_text_stripped = raw_prompt.strip()
+        
+        # Run optimization (Stage 2 & 3)
+        optimized_text = _engine.optimize_user_prompt(raw_prompt)
+        
+        # Fallback guard: if optimized prompt is longer or equal to original stripped text, return original stripped directly
+        if len(optimized_text) >= len(original_text_stripped):
+            optimized_text = original_text_stripped
+            original_tokens = _engine._estimate_tokens(original_text_stripped)
+            if original_tokens == 0 and len(original_text_stripped) > 0:
+                original_tokens = max(1, len(original_text_stripped) // 4)
+            optimized_tokens = original_tokens
+            savings_percentage = 0.0
+        else:
+            # Calculate tokens
+            original_tokens = _engine._estimate_tokens(raw_prompt)
+            if original_tokens == 0 and len(raw_prompt) > 0:
+                original_tokens = max(1, len(raw_prompt) // 4)
+                
+            optimized_tokens = _engine._estimate_tokens(optimized_text)
+            if optimized_tokens == 0 and len(optimized_text) > 0:
+                optimized_tokens = max(1, len(optimized_text) // 4)
+            
+            if original_tokens > 0:
+                savings = ((original_tokens - optimized_tokens) / original_tokens) * 100
+                savings_percentage = max(0.0, round(savings, 1))
+            else:
+                savings_percentage = 0.0
+
+        return OptimizeResponse(
+            optimized_prompt=optimized_text,
+            original_tokens=original_tokens,
+            optimized_tokens=optimized_tokens,
+            savings_percentage=savings_percentage
+        )
+    except Exception as e:
+        logger.error(f"Internal engine error during optimize: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/prompt/generate", response_model=OptimizeResponse)
+async def generate_master_prompt(payload: PromptOptimizeRequest):
+    """
+    Expands a short idea into a highly detailed Master Prompt via Gemini 2.5.
+    """
     raw_prompt = payload.raw_prompt
     
-    # Run optimization (Stage 2 & 3)
-    optimized_text = _engine.optimize_user_prompt(raw_prompt)
+    provider = "gemini"
+    model_used = "gemini-2.5-flash"
     
-    # Calculate tokens
-    original_tokens = _engine._estimate_tokens(raw_prompt)
-    if original_tokens == 0 and len(raw_prompt) > 0:
-        original_tokens = max(1, len(raw_prompt) // 4)
+    upstream_url = _build_upstream_url(provider)
+    try:
+        headers = _build_provider_headers(provider)
+    except HTTPException:
+        # Provide a graceful fallback error
+        raise HTTPException(status_code=400, detail="Gemini API Key missing or not configured for Prompt Expansion.")
         
-    optimized_tokens = _engine._estimate_tokens(optimized_text)
-    if optimized_tokens == 0 and len(optimized_text) > 0:
-        optimized_tokens = max(1, len(optimized_text) // 4)
+    system_prompt = (
+        "You are an Expert Prompt Engineer. Take the user's short idea and EXPAND it into a highly "
+        "detailed, professional Master Prompt. Include sections for: Role, Context, Task, Constraints, "
+        "and Output Format. Return ONLY the markdown prompt text without any conversational pleasantries."
+    )
     
-    tokens_saved = max(original_tokens - optimized_tokens, 0)
-    savings_percentage = round(1 - optimized_tokens / original_tokens, 4) if original_tokens > 0 else 0.0
-
+    body = {
+        "model": model_used,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": raw_prompt}
+        ],
+        "temperature": 0.7,
+        "stream": False
+    }
+    
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+        resp = await client.post(upstream_url, headers=headers, json=body)
+        
+    if resp.status_code != 200:
+        logger.error("Generate error: %d - %s", resp.status_code, resp.text)
+        generated_prompt = f"⚠️ Generation failed: {resp.status_code}"
+    else:
+        data = resp.json()
+        generated_prompt = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        
+    generated_length = _engine._estimate_tokens(generated_prompt)
+    if generated_length == 0 and len(generated_prompt) > 0:
+        generated_length = max(1, len(generated_prompt) // 4)
+        
     return OptimizeResponse(
-        optimized_prompt=optimized_text,
-        original_tokens=original_tokens,
-        optimized_tokens=optimized_tokens,
-        savings_percentage=savings_percentage * 100
+        optimized_prompt=generated_prompt,
+        original_tokens=0,
+        optimized_tokens=generated_length,
+        savings_percentage=0.0
     )

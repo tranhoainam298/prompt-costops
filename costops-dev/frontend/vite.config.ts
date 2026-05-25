@@ -9,15 +9,15 @@ export default defineConfig({
     host: true,
     proxy: {
       '/v1': {
-        target: 'http://localhost:8000',
+        target: 'http://gateway:8000',
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://backend:3000',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: 'ws://gateway:8000',
         ws: true,
       },
     },
