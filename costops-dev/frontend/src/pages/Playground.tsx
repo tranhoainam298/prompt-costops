@@ -26,6 +26,7 @@ interface WalletStatus {
   gemini_bound: boolean;
   openai_bound: boolean;
   anthropic_bound: boolean;
+  openrouter_bound: boolean;
 }
 
 const Playground: React.FC = () => {
@@ -290,6 +291,7 @@ const Playground: React.FC = () => {
     if (provider === 'gemini') return walletStatus.gemini_bound;
     if (provider === 'openai') return walletStatus.openai_bound;
     if (provider === 'anthropic') return walletStatus.anthropic_bound;
+    if (provider === 'openrouter') return walletStatus.openrouter_bound;
     return false;
   };
 
@@ -415,6 +417,11 @@ const Playground: React.FC = () => {
               <option value="gemini-2.5-flash">gemini-2.5-flash</option>
               <option value="claude-sonnet-4-20250514">claude-sonnet</option>
               <option value="deepseek-chat">deepseek-chat</option>
+              <option value="moonshotai/kimi-k2.6:free">kimi-k2.6 (free)</option>
+              <option value="minimax-m3-free">minimax-m3 (free)</option>
+              <option value="google/gemma-2-9b-it:free">gemma-2-9b (free)</option>
+              <option value="meta-llama/llama-3-8b-instruct:free">llama-3-8b (free)</option>
+              <option value="openrouter/free">openrouter-auto (free)</option>
             </select>
           </div>
         </header>
@@ -762,6 +769,7 @@ const Playground: React.FC = () => {
                       <option value="openai">OpenAI</option>
                       <option value="gemini">Google Gemini</option>
                       <option value="anthropic">Anthropic</option>
+                      <option value="openrouter">OpenRouter (Kimi)</option>
                     </select>
                     
                     <input

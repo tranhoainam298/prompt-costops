@@ -85,7 +85,7 @@ class User(Base):
         String(255), nullable=False,
     )
     role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole, name="user_role", create_constraint=True),
+        Enum(UserRole, name="UserRole", create_constraint=True),
         default=UserRole.member,
         nullable=False,
     )
@@ -512,7 +512,7 @@ class UserSkill(Base):
         Float, default=0.0, nullable=False,
     )
     status: Mapped[SkillStatus] = mapped_column(
-        Enum(SkillStatus, name="skill_status", create_constraint=True),
+        Enum(SkillStatus, name="SkillStatus", create_constraint=True),
         default=SkillStatus.weak,
         nullable=False,
     )
@@ -634,7 +634,7 @@ class CostAlert(Base):
         index=True,
     )
     alert_type: Mapped[AlertType] = mapped_column(
-        Enum(AlertType, name="alert_type", create_constraint=True),
+        Enum(AlertType, name="AlertType", create_constraint=True),
         nullable=False,
     )
     message: Mapped[str] = mapped_column(

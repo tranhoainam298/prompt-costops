@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     deepseek_api_key: str = ""
     gemini_api_key: str = ""
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
+    # ── OpenCode (MiniMax M3 Free) ───────────────────────
+    opencode_api_key: str = ""
+    opencode_base_url: str = "https://opencode.ai/zen"
 
     # ── Rate Limits ──────────────────────────────────────
     default_rate_limit: int = 60
@@ -44,4 +50,8 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     """Return a cached singleton of application settings."""
-    return Settings()
+    settings = Settings()
+    if settings.database_url.startswith("postgresql://"):
+        settings.database_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return settings
+
