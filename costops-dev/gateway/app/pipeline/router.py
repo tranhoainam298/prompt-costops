@@ -32,6 +32,15 @@ MODEL_CATALOG: dict[str, dict[str, float]] = {
     "gemini": {
         "gemini-2.5-flash": 0.0014,
     },
+    "openrouter": {
+        "moonshotai/kimi-k2.6:free": 0.0,
+        "google/gemma-2-9b-it:free": 0.0,
+        "meta-llama/llama-3-8b-instruct:free": 0.0,
+        "openrouter/free": 0.0,
+    },
+    "opencode": {
+        "minimax-m3-free": 0.0,
+    },
 }
 
 # Ordered cheapest-first for fallback selection

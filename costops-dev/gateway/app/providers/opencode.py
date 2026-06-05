@@ -1,7 +1,12 @@
 """
-costops-dev — OpenAI Provider Adapter.
+costops-dev — OpenCode Provider Adapter.
 
-Wraps the OpenAI REST API behind a unified provider interface.
+Wraps the OpenCode (opencode.ai) API behind a unified provider interface.
+OpenCode provides access to free models (e.g. MiniMax M3) via an
+Anthropic-compatible Messages API at https://opencode.ai/zen.
+
+The API uses the Anthropic Messages format but is accessed via OpenAI-
+compatible chat/completions when proxied through our gateway.
 """
 
 from __future__ import annotations
@@ -16,10 +21,10 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 
 
-class OpenAIProvider:
-    """Adapter for the OpenAI chat completions API."""
+class OpenCodeProvider:
+    """Adapter for the OpenCode (MiniMax M3 Free) API."""
 
-    BASE_URL = "https://openrouter.ai/api/v1"
+    BASE_URL = "https://opencode.ai/zen"
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -30,24 +35,24 @@ class OpenAIProvider:
             self._client = httpx.AsyncClient(
                 base_url=self.BASE_URL,
                 headers={
-                    "Authorization": f"Bearer {self.settings.openrouter_api_key}",
+                    "Authorization": f"Bearer {self.settings.opencode_api_key}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "http://localhost:5173", # Optional, for OpenRouter rankings
-                    "X-Title": "CostOps", # Optional, for OpenRouter rankings
+                    "HTTP-Referer": "https://costops.dev",
+                    "X-Title": "CostOps Gateway",
                 },
-                timeout=httpx.Timeout(60.0),
+                timeout=httpx.Timeout(120.0),
             )
         return self._client
 
     async def chat_completion(
         self,
         *,
-        model: str = "google/gemini-2.0-flash-lite-preview-02-05:free",
+        model: str = "minimax-m3-free",
         messages: list[dict[str, str]],
         temperature: float = 1.0,
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
-        """Send a chat completion request to OpenAI and return the raw JSON."""
+        """Send a chat completion request to OpenCode and return the raw JSON."""
         client = await self._get_client()
         payload: dict[str, Any] = {
             "model": model,

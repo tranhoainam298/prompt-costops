@@ -156,39 +156,59 @@ class PromptOptimizationEngine:
             logger.warning("GEMINI_API_KEY not found in settings or env. Falling back to rule-based compression.")
             return self._fallback_rule_based(raw_prompt)
 
+        import time
         system_prompt = self.DYNAMIC_COMPILER_INSTRUCTION
 
-        try:
-            # We use the OpenAI-compatible endpoint of Google Gemini API
-            url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            body = {
-                "model": "gemini-2.5-flash",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": raw_prompt}
-                ],
-                "temperature": 0.2,
-                "stream": False
-            }
-            
-            with httpx.Client(timeout=10.0) as client:
-                response = client.post(url, headers=headers, json=body)
-                if response.status_code == 200:
-                    data = response.json()
-                    optimized_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    if optimized_text:
-                        logger.info("Stage 2 & 3 — dynamic semantic optimization succeeded")
-                        return optimized_text.strip()
-                print(f"GEMINI API EXECUTION FAILED with status {response.status_code}: {response.text}")
-                response.raise_for_status()
-        except Exception as e:
-            print(f"GEMINI API EXECUTION FAILED: {str(e)}")
-            logger.error(f"Error during dynamic semantic optimization: {str(e)}")
-            raise e
+        url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        body = {
+            "model": "gemini-2.5-flash",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": raw_prompt}
+            ],
+            "temperature": 0.2,
+            "stream": False
+        }
+
+        max_retries = 3
+        backoff_delay = 1.0
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                # We use the OpenAI-compatible endpoint of Google Gemini API
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.post(url, headers=headers, json=body)
+                    if response.status_code == 200:
+                        data = response.json()
+                        optimized_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if optimized_text:
+                            logger.info("Stage 2 & 3 — dynamic semantic optimization succeeded")
+                            return optimized_text.strip()
+                    
+                    if response.status_code in (429, 500, 502, 503, 504):
+                        logger.warning(
+                            "Gemini prompt optimization attempt %d failed with status %d. Retrying...",
+                            attempt, response.status_code
+                        )
+                        raise httpx.HTTPStatusError(
+                            f"Status {response.status_code}",
+                            request=response.request,
+                            response=response
+                        )
+                    
+                    print(f"GEMINI API EXECUTION FAILED with status {response.status_code}: {response.text}")
+                    response.raise_for_status()
+            except Exception as e:
+                if attempt == max_retries:
+                    print(f"GEMINI API EXECUTION FAILED AFTER {max_retries} ATTEMPTS: {str(e)}")
+                    logger.error(f"Error during dynamic semantic optimization: {str(e)}. Falling back to rule-based compression.")
+                    return self._fallback_rule_based(raw_prompt)
+                time.sleep(backoff_delay)
+                backoff_delay *= 2.0
 
     def _fallback_rule_based(self, raw_prompt: str) -> str:
         """Rule-based fallback optimization when LLM optimization fails."""

@@ -185,6 +185,9 @@ async def bind_key(
     elif provider == "anthropic":
         url = "https://api.anthropic.com/v1/models" # simplified check or just users list
         headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    elif provider == "openrouter":
+        url = "https://openrouter.ai/api/v1/models"
+        headers = {"Authorization": f"Bearer {api_key}"}
     else:
         raise HTTPException(status_code=400, detail="Unsupported provider")
         
@@ -251,4 +254,5 @@ async def get_wallet_status(
         "gemini_bound": "gemini" in bound_providers,
         "openai_bound": "openai" in bound_providers,
         "anthropic_bound": "anthropic" in bound_providers,
+        "openrouter_bound": "openrouter" in bound_providers,
     }

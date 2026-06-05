@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import time
+import asyncio
 import uuid
 import logging
 from typing import Any, AsyncGenerator
@@ -41,7 +42,9 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from app.pipeline.engine import PromptOptimizationEngine
+from app.pipeline.router import MODEL_CATALOG
 from app.services.token_counter import TokenCounter
+from app.services.precrime import precrime_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -126,20 +129,28 @@ _counter = TokenCounter(model="gpt-4o")
 
 _PROVIDER_CONFIG: dict[str, dict[str, str]] = {
     "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "key_attr": "openai_api_key",
+        "base_url": settings.openrouter_base_url,
+        "key_attr": "openrouter_api_key",
     },
     "deepseek": {
-        "base_url": "https://api.deepseek.com/v1",
-        "key_attr": "deepseek_api_key",
+        "base_url": settings.openrouter_base_url,
+        "key_attr": "openrouter_api_key",
     },
     "anthropic": {
-        "base_url": "https://api.anthropic.com/v1",
-        "key_attr": "anthropic_api_key",
+        "base_url": settings.openrouter_base_url,
+        "key_attr": "openrouter_api_key",
     },
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
         "key_attr": "gemini_api_key",
+    },
+    "openrouter": {
+        "base_url": settings.openrouter_base_url,
+        "key_attr": "openrouter_api_key",
+    },
+    "opencode": {
+        "base_url": settings.opencode_base_url,
+        "key_attr": "opencode_api_key",
     },
 }
 
@@ -258,6 +269,20 @@ def _build_provider_headers(provider: str) -> dict[str, str]:
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
+    if provider == "openrouter":
+        return {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://costops.dev",
+            "X-Title": "CostOps Gateway",
+        }
+    if provider == "opencode":
+        return {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://costops.dev",
+            "X-Title": "CostOps Gateway",
+        }
     return {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -282,8 +307,24 @@ def _build_upstream_payload(
     stream: bool,
 ) -> dict[str, Any]:
     """Assemble the JSON body sent to the upstream provider."""
+    # Map model names to OpenRouter equivalents
+    model_mapping = {
+        "gpt-4o": "openai/gpt-4o",
+        "gpt-4o-mini": "openai/gpt-4o-mini",
+        "gpt-4-turbo": "openai/gpt-4-turbo",
+        "claude-sonnet-4-20250514": "anthropic/claude-3.5-sonnet",
+        "claude-3-haiku-20240307": "anthropic/claude-3-haiku",
+        "deepseek-chat": "deepseek/deepseek-chat",
+        "deepseek-coder": "deepseek/deepseek-coder",
+        "gemini-2.5-flash": "google/gemini-2.5-flash",
+        "minimax-m3-free": "minimax-m3-free",
+    }
+    mapped_model = model_mapping.get(model_used, model_used)
+    if provider == "gemini" and mapped_model.startswith("google/"):
+        mapped_model = mapped_model.replace("google/", "")
+
     body: dict[str, Any] = {
-        "model": model_used,
+        "model": mapped_model,
         "messages": optimized_messages,
         "temperature": payload.temperature,
         "top_p": payload.top_p,
@@ -295,6 +336,7 @@ def _build_upstream_payload(
     if payload.max_tokens is not None:
         body["max_tokens"] = payload.max_tokens
     return body
+
 
 
 def _estimate_cost(
@@ -446,7 +488,6 @@ async def _persist_usage(
 
             # ── 4. WebSocket Real-time Broadcast ──────────
             if user_uuid is not None:
-                from sqlalchemy import select
                 from app.routes.ws import ws_service
                 
                 # Fetch fresh balance from DB
@@ -485,88 +526,137 @@ async def _persist_usage(
 
 
 async def _stream_upstream(
-    provider: str,
-    upstream_url: str,
-    headers: dict[str, str],
-    body: dict[str, Any],
+    initial_provider: str,
+    optimized_messages: list[dict[str, str]],
+    payload: ChatCompletionRequest,
     request_id: str,
     created_ts: int,
-    model_used: str,
-) -> AsyncGenerator[tuple[str, str], None]:
+    initial_model: str,
+) -> AsyncGenerator[tuple[str, str, str, str], None]:
     """
     Open a streaming connection to the upstream provider and yield each
-    SSE line as-is.  Also accumulates the total completion text so
-    the caller can count ``completion_tokens`` after the stream ends.
+    SSE line as-is. Performs automatic retries on 429/5xx and fails over to backup
+    free models if all retries fail.
 
-    Yields ``(sse_line, accumulated_text)`` tuples.
+    Yields (sse_line, accumulated_text, final_provider, final_model) tuples.
     """
+    import asyncio
+
+    # Establish fallback model sequence
+    models_to_try = [(initial_provider, initial_model)]
+    if initial_provider == "openrouter":
+        free_fallbacks = [
+            "google/gemini-2.0-flash-lite-preview-02-05:free",
+            "meta-llama/llama-3-8b-instruct:free",
+            "google/gemma-2-9b-it:free"
+        ]
+        for fb_model in free_fallbacks:
+            if fb_model != initial_model:
+                models_to_try.append(("openrouter", fb_model))
+        # Fallback to free OpenCode MiniMax M3
+        models_to_try.append(("opencode", "minimax-m3-free"))
+        # Ultimate fallback is native Gemini
+        models_to_try.append(("gemini", "gemini-2.5-flash"))
+    elif initial_provider == "opencode":
+        # OpenCode fallback: try OpenRouter free models, then Gemini
+        models_to_try.append(("openrouter", "moonshotai/kimi-k2.6:free"))
+        models_to_try.append(("gemini", "gemini-2.5-flash"))
+    elif initial_provider != "gemini":
+        models_to_try.append(("gemini", "gemini-2.5-flash"))
+
     accumulated_text = ""
+    success = False
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
-        async with client.stream(
-            "POST",
-            upstream_url,
-            headers=headers,
-            json=body,
-        ) as response:
-            if response.status_code != 200:
-                error_body = await response.aread()
-                error_text = error_body.decode("utf-8", errors="replace")
+    for current_provider, current_model in models_to_try:
+        if success:
+            break
+
+        upstream_url = _build_upstream_url(current_provider)
+        headers = _build_provider_headers(current_provider)
+        body = _build_upstream_payload(
+            payload, optimized_messages, current_model, provider=current_provider, stream=True
+        )
+
+        max_retries = 3
+        backoff_delay = 1.0
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+                    async with client.stream(
+                        "POST",
+                        upstream_url,
+                        headers=headers,
+                        json=body,
+                    ) as response:
+                        if response.status_code == 200:
+                            async for raw_line in response.aiter_lines():
+                                line = raw_line.strip()
+                                if not line:
+                                    continue
+
+                                # Pass SSE lines through to the caller
+                                if line.startswith("data: "):
+                                    data_str = line[6:]
+                                    if data_str == "[DONE]":
+                                        yield "data: [DONE]\n\n", accumulated_text, current_provider, current_model
+                                        success = True
+                                        return
+
+                                    try:
+                                        chunk = json.loads(data_str)
+                                        choices = chunk.get("choices", [])
+                                        for choice in choices:
+                                            delta = choice.get("delta", {})
+                                            content_piece = delta.get("content", "")
+                                            if content_piece:
+                                                accumulated_text += content_piece
+                                    except Exception:
+                                        pass
+
+                                    yield f"data: {data_str}\n\n", accumulated_text, current_provider, current_model
+                            
+                            yield "data: [DONE]\n\n", accumulated_text, current_provider, current_model
+                            success = True
+                            return
+
+                        if response.status_code in (429, 500, 502, 503, 504):
+                            logger.warning(
+                                "Upstream %s/%s attempt %d returned status %d. Retrying...",
+                                current_provider, current_model, attempt, response.status_code
+                            )
+                            raise httpx.HTTPStatusError(
+                                f"Status {response.status_code}",
+                                request=response.request,
+                                response=response
+                            )
+
+                        logger.error(
+                            "Upstream %s/%s returned non-retryable status %d",
+                            current_provider, current_model, response.status_code
+                        )
+                        break  # Break retry loop to try next fallback model
+            except Exception as e:
                 logger.error(
-                    "Upstream %s returned %d: %s",
-                    provider,
-                    response.status_code,
-                    error_text[:500],
+                    "Error during connection to %s/%s (attempt %d): %s",
+                    current_provider, current_model, attempt, str(e)
                 )
-                # Emit a single error chunk to the client
-                error_chunk = {
-                    "id": request_id,
-                    "object": "chat.completion.chunk",
-                    "created": created_ts,
-                    "model": model_used,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {
-                                "content": f"[CostOps Error] Upstream returned {response.status_code}",
-                            },
-                            "finish_reason": "stop",
-                        }
-                    ],
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n", ""
-                yield "data: [DONE]\n\n", ""
-                return
+                if attempt < max_retries:
+                    await asyncio.sleep(backoff_delay)
+                    backoff_delay *= 2.0
+                else:
+                    logger.warning(
+                        "All %d retry attempts failed for %s/%s.",
+                        max_retries, current_provider, current_model
+                    )
 
-            # ── Stream SSE lines ─────────────────────────
-            async for raw_line in response.aiter_lines():
-                line = raw_line.strip()
-                if not line:
-                    continue
-
-                # Pass SSE lines through to the caller
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    if data_str == "[DONE]":
-                        yield "data: [DONE]\n\n", accumulated_text
-                        return
-
-                    try:
-                        chunk = json.loads(data_str)
-                        # Extract delta content for char accumulation
-                        choices = chunk.get("choices", [])
-                        for choice in choices:
-                            delta = choice.get("delta", {})
-                            content_piece = delta.get("content", "")
-                            if content_piece:
-                                accumulated_text += content_piece
-                    except json.JSONDecodeError:
-                        pass
-
-                    yield f"data: {data_str}\n\n", accumulated_text
-
-    # Safety: always end with [DONE]
-    yield "data: [DONE]\n\n", accumulated_text
+    # Gate 3: Clean Exception Formatting
+    error_chunk = {
+        "error": "Upstream Provider Overloaded",
+        "status": "Degraded",
+        "message": "All openrouter free endpoints are experiencing high traffic. Please try again shortly."
+    }
+    yield f"data: {json.dumps(error_chunk)}\n\n", "", "openrouter", "error"
 
 
 # ── Endpoint ─────────────────────────────────────────────
@@ -603,6 +693,19 @@ async def chat_completions(
     # Resolve user identity (injected by AuthMiddleware)
     user_id_str: str | None = getattr(request.state, "user_id", None) or payload.user or "00000000-0000-0000-0000-000000000000"
     source_tool: str = request.headers.get("X-Source-Tool", "api")
+    
+    # ── Pre-Crime Loop Interception ──────────────────────
+    is_loop = await precrime_service.detect_loop(user_id_str, user_text)
+    if is_loop:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "Agentic Loop Detected",
+                "status": "Terminated",
+                "message": "Infinite loop logic intercepted by CostOps Guardrails.",
+                "blast_radius_tokens_saved": 4500
+            }
+        )
     
     # Session handling: Create one if session_id is None
     if not payload.session_id:
@@ -671,28 +774,31 @@ async def chat_completions(
 
     provider = result.selected_provider
     model_used = result.selected_model
-    upstream_url = _build_upstream_url(provider)
-    headers = _build_provider_headers(provider)
-    body = _build_upstream_payload(
-        payload, optimized_messages, model_used, provider=provider, stream=payload.stream,
-    )
 
     # ── 4a. Streaming mode ───────────────────────────────
     if payload.stream:
         async def _sse_generator() -> AsyncGenerator[str, None]:
             """Relay upstream SSE chunks and persist usage when done."""
             final_text = ""
-            async for sse_line, comp_text in _stream_upstream(
-                provider=provider,
-                upstream_url=upstream_url,
-                headers=headers,
-                body=body,
+            final_provider = provider
+            final_model = model_used
+            async for sse_line, comp_text, current_provider, current_model in _stream_upstream(
+                initial_provider=provider,
+                optimized_messages=optimized_messages,
+                payload=payload,
                 request_id=request_id,
                 created_ts=created_ts,
-                model_used=model_used,
+                initial_model=model_used,
             ):
                 final_text = comp_text
+                final_provider = current_provider
+                final_model = current_model
                 yield sse_line
+
+            # If final_model is "error", then streaming failover completely failed.
+            # Do not persist usage since it was an error.
+            if final_model == "error":
+                return
 
             # ── Post-stream persistence ──────────────────
             # Calculate actual completion tokens using TokenCounter.
@@ -706,14 +812,14 @@ async def chat_completions(
                 optimized_tokens=optimized_tokens,
                 completion_tokens=est_completion_tokens,
                 model_requested=payload.model,
-                model_used=model_used,
-                provider=provider,
+                model_used=final_model,
+                provider=final_provider,
                 compression_ratio=result.compression_ratio,
                 source_tool=source_tool,
                 session_id=payload.session_id,
             )
 
-        headers = {
+        headers_sse = {
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
@@ -721,39 +827,109 @@ async def chat_completions(
             "X-CostOps-Tokens-Saved": str(original_tokens - optimized_tokens),
         }
         if payload.session_id:
-            headers["X-CostOps-Session-Id"] = payload.session_id
+            headers_sse["X-CostOps-Session-Id"] = payload.session_id
 
         return StreamingResponse(
             _sse_generator(),
             media_type="text/event-stream",
-            headers=headers,
+            headers=headers_sse,
         )
 
-    # ── 4b. Non-streaming mode ───────────────────────────
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
-        upstream_resp = await client.post(
-            upstream_url,
-            headers=headers,
-            json=body,
+    # ── 4b. Non-streaming mode with Retry & Failover ───────────────────────────
+    models_to_try = [(provider, model_used)]
+    if provider == "openrouter":
+        free_fallbacks = [
+            "google/gemini-2.0-flash-lite-preview-02-05:free",
+            "meta-llama/llama-3-8b-instruct:free",
+            "google/gemma-2-9b-it:free"
+        ]
+        for fb_model in free_fallbacks:
+            if fb_model != model_used:
+                models_to_try.append(("openrouter", fb_model))
+        # Ultimate fallback is native Gemini
+        models_to_try.append(("gemini", "gemini-2.5-flash"))
+    elif provider != "gemini":
+        models_to_try.append(("gemini", "gemini-2.5-flash"))
+
+    upstream_resp = None
+    success = False
+    final_provider = provider
+    final_model = model_used
+
+    for current_provider, current_model in models_to_try:
+        if success:
+            break
+
+        upstream_url = _build_upstream_url(current_provider)
+        headers = _build_provider_headers(current_provider)
+        body = _build_upstream_payload(
+            payload, optimized_messages, current_model, provider=current_provider, stream=False
         )
 
-    if upstream_resp.status_code != 200:
-        logger.error(
-            "Upstream %s returned %d: %s",
-            provider,
-            upstream_resp.status_code,
-            upstream_resp.text[:500],
-        )
+        max_retries = 3
+        backoff_delay = 1.0
+        final_provider = current_provider
+        final_model = current_model
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+                    response = await client.post(
+                        upstream_url,
+                        headers=headers,
+                        json=body,
+                    )
+                    if response.status_code == 200:
+                        upstream_resp = response
+                        success = True
+                        break
+
+                    if response.status_code in (429, 500, 502, 503, 504):
+                        logger.warning(
+                            "Upstream %s/%s attempt %d returned status %d. Retrying...",
+                            current_provider, current_model, attempt, response.status_code
+                        )
+                        raise httpx.HTTPStatusError(
+                            f"Status {response.status_code}",
+                            request=response.request,
+                            response=response
+                        )
+
+                    logger.error(
+                        "Upstream %s/%s returned non-retryable status %d",
+                        current_provider, current_model, response.status_code
+                    )
+                    upstream_resp = response
+                    break  # Break retry loop to try next fallback model
+            except Exception as e:
+                logger.error(
+                    "Error during connection to %s/%s (attempt %d): %s",
+                    current_provider, current_model, attempt, str(e)
+                )
+                if attempt < max_retries:
+                    await asyncio.sleep(backoff_delay)
+                    backoff_delay *= 2.0
+                else:
+                    logger.warning(
+                        "All %d retry attempts failed for %s/%s.",
+                        max_retries, current_provider, current_model
+                    )
+
+    if not success:
+        # Gate 3: Clean Exception Formatting
+        logger.error("All non-streaming attempts and failovers failed.")
         return JSONResponse(
-            status_code=upstream_resp.status_code,
+            status_code=503,
             content={
-                "error": {
-                    "message": f"Upstream provider error: {upstream_resp.status_code}",
-                    "type": "upstream_error",
-                    "code": upstream_resp.status_code,
-                }
-            },
+                "error": "Upstream Provider Overloaded",
+                "status": "Degraded",
+                "message": "All openrouter free endpoints are experiencing high traffic. Please try again shortly."
+            }
         )
+
+    # Make sure we use the successful provider/model for the remaining code
+    provider = final_provider
+    model_used = final_model
 
     upstream_data = upstream_resp.json()
 
@@ -790,14 +966,29 @@ async def chat_completions(
 
 
 @router.post("/prompt/optimize", response_model=OptimizeResponse)
-async def optimize_prompt(payload: PromptOptimizeRequest):
+async def optimize_prompt(payload: PromptOptimizeRequest, request: Request):
     """
     Explicitly run Stage 2 & 3 optimizations without calling upstream APIs.
     """
     print(f"CRITICAL GATEWAY LOG - Received raw_prompt: {payload.raw_prompt}")
     
+    raw_prompt = payload.raw_prompt
+    user_id_str: str | None = getattr(request.state, "user_id", None) or "00000000-0000-0000-0000-000000000000"
+    
+    # ── Pre-Crime Loop Interception ──────────────────────
+    is_loop = await precrime_service.detect_loop(user_id_str, raw_prompt)
+    if is_loop:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "Agentic Loop Detected",
+                "status": "Terminated",
+                "message": "Infinite loop logic intercepted by CostOps Guardrails.",
+                "blast_radius_tokens_saved": 4500
+            }
+        )
+        
     try:
-        raw_prompt = payload.raw_prompt
         original_text_stripped = raw_prompt.strip()
         
         # Run optimization (Stage 2 & 3)
@@ -829,11 +1020,25 @@ async def optimize_prompt(payload: PromptOptimizeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/prompt/generate", response_model=OptimizeResponse)
-async def generate_master_prompt(payload: PromptOptimizeRequest):
+async def generate_master_prompt(payload: PromptOptimizeRequest, request: Request):
     """
     Expands a short idea into a highly detailed Master Prompt via Gemini 2.5.
     """
     raw_prompt = payload.raw_prompt
+    user_id_str: str | None = getattr(request.state, "user_id", None) or "00000000-0000-0000-0000-000000000000"
+    
+    # ── Pre-Crime Loop Interception ──────────────────────
+    is_loop = await precrime_service.detect_loop(user_id_str, raw_prompt)
+    if is_loop:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "Agentic Loop Detected",
+                "status": "Terminated",
+                "message": "Infinite loop logic intercepted by CostOps Guardrails.",
+                "blast_radius_tokens_saved": 4500
+            }
+        )
     
     provider = "gemini"
     model_used = "gemini-2.5-flash"

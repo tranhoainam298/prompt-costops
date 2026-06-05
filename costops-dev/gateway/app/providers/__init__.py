@@ -4,5 +4,7 @@ from app.providers.openai import OpenAIProvider
 from app.providers.anthropic import AnthropicProvider
 from app.providers.deepseek import DeepSeekProvider
 from app.providers.gemini import GeminiProvider
+from app.providers.openrouter import OpenRouterProvider
+from app.providers.opencode import OpenCodeProvider
 
-__all__ = ["OpenAIProvider", "AnthropicProvider", "DeepSeekProvider", "GeminiProvider"]
+__all__ = ["OpenAIProvider", "AnthropicProvider", "DeepSeekProvider", "GeminiProvider", "OpenRouterProvider", "OpenCodeProvider"]

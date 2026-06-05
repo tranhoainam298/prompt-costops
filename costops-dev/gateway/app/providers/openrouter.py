@@ -1,7 +1,9 @@
 """
-costops-dev — OpenAI Provider Adapter.
+costops-dev — OpenRouter Provider Adapter.
 
-Wraps the OpenAI REST API behind a unified provider interface.
+Wraps the OpenRouter API behind a unified provider interface.
+OpenRouter provides access to many models (including Kimi K2.6) via
+an OpenAI-compatible API.
 """
 
 from __future__ import annotations
@@ -16,8 +18,8 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 
 
-class OpenAIProvider:
-    """Adapter for the OpenAI chat completions API."""
+class OpenRouterProvider:
+    """Adapter for the OpenRouter chat completions API."""
 
     BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -32,22 +34,22 @@ class OpenAIProvider:
                 headers={
                     "Authorization": f"Bearer {self.settings.openrouter_api_key}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "http://localhost:5173", # Optional, for OpenRouter rankings
-                    "X-Title": "CostOps", # Optional, for OpenRouter rankings
+                    "HTTP-Referer": "https://costops.dev",
+                    "X-Title": "CostOps Gateway",
                 },
-                timeout=httpx.Timeout(60.0),
+                timeout=httpx.Timeout(120.0),
             )
         return self._client
 
     async def chat_completion(
         self,
         *,
-        model: str = "google/gemini-2.0-flash-lite-preview-02-05:free",
+        model: str = "moonshotai/kimi-k2.6:free",
         messages: list[dict[str, str]],
         temperature: float = 1.0,
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
-        """Send a chat completion request to OpenAI and return the raw JSON."""
+        """Send a chat completion request to OpenRouter and return the raw JSON."""
         client = await self._get_client()
         payload: dict[str, Any] = {
             "model": model,

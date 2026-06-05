@@ -23,3 +23,11 @@ Thumbs.db
 
 # LƯU Ý: KHÔNG CHẶN .agents để giữ lại Skills cho AI Agent dùng chung
 !.agents/
+
+# Python cache
+**/__pycache__/
+*.pyc
+
+# Codegraph
+.codegraph/
+
